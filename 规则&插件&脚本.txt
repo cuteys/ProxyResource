@@ -21,16 +21,25 @@ WARP：https://likeable-fuschia-f06.notion.site/Woker-IP-6f734d819a874fdf9ce95ff
 CF Woker： https://likeable-fuschia-f06.notion.site/CF-Woker-195b0ffa0e624383883739614a666fc3
 
 # 延时测试链接地址
-Google：http://www.gstatic.com/generate_204
-Google：http://www.google-analytics.com/generate_204
-Google：http://www.google.com/generate_204
-Google：http://connectivitycheck.gstatic.com/generate_204
-Apple：http://captive.apple.com
-Apple：http://www.apple.com/library/test/success.html
-MicroSoft：http://www.msftconnecttest.com/connecttest.txt
-Cloudflare：http://cp.cloudflare.com
-Firefox：http://detectportal.firefox.com/success.txt
-V2ex：http://www.v2ex.com/generate_204
-小米：http://connect.rom.miui.com/generate_204
-华为：http://connectivitycheck.platform.hicloud.com/generate_204
-Vivo：http://wifi.vivo.com.cn/generate_204
+Google：
+http://www.gstatic.com/generate_204
+http://www.google-analytics.com/generate_204
+http://www.google.com/generate_204
+http://connectivitycheck.gstatic.com/generate_204
+Apple：
+http://captive.apple.com
+http://www.apple.com/library/test/success.html
+MicroSoft：
+http://www.msftconnecttest.com/connecttest.txt
+Cloudflare：
+http://cp.cloudflare.com
+Firefox：
+http://detectportal.firefox.com/success.txt
+V2ex：
+http://www.v2ex.com/generate_204
+小米：
+http://connect.rom.miui.com/generate_204
+华为：
+http://connectivitycheck.platform.hicloud.com/generate_204
+Vivo：
+http://wifi.vivo.com.cn/generate_204
