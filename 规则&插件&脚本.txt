@@ -1,55 +1,82 @@
 # 签到脚本
-🌸Sakura樱花交流会：
+🌸Sakura樱花交流会
 https://raw.githubusercontent.com/xream/scripts/main/surge/modules/sub-store-scripts/check/entrance.js#concurrency=10&timeout=5000&retries=1
+Tartarus
+https://raw.githubusercontent.com/Tartarus2014/Loon-Script/master/Task.conf
+
+# 插件
+TeseFlight解锁
+https://www.nsloon.com/openloon/import?plugin=https://gitlab.com/lodepuly/vpn_tool/-/raw/main/Tool/Loon/Plugin/TestFlight.plugin
 
 # 分流、重写、脚本共存
-deezertidal：
+deezertidal
 https://github.com/deezertidal/QuantumultX-Rewrite
-blackmatrix7：
+blackmatrix7
 https://github.com/blackmatrix7/ios_rule_script
 
 # iOS APP推荐
-Delta游戏模拟器：
+Delta游戏模拟器
 https://limbopro.com/archives/Delta-Emulator.html
 
-#Telegram 客户端更改中文
-聪聪：
-tg://setlanguage?lang=zhcncc
-TG：
-tg://setlanguage?lang=zh-hans-raw
-zh_CN 板：
-tg://setlanguage?lang=classic-zh-cn
-langCN：
-tg://setlanguage?lang=zhlangcn
-
 # IP优选
-WARP：
-https://likeable-fuschia-f06.notion.site/Woker-IP-6f734d819a874fdf9ce95ff51120fc93（iOS端ish异常报错）
+CF Woker
+https://likeable-fuschia-f06.notion.site/Woker-IP-6f734d819a874fdf9ce95ff51120fc93
+WARP
+https://www.kejicode.cn/index.php/archives/39/（iOS端ish异常报错）
 
 # 白嫖
-CF Woker：
+CF Woker
 https://likeable-fuschia-f06.notion.site/CF-Woker-195b0ffa0e624383883739614a666fc3
+WARP
+https://github.com/getsomecat/GetSomeCats/blob/Surge/Loon新手起步折腾Warp.md
+胖虎
+https://raw.githubusercontent.com/gitbigg/dy/main/jd
+https://t.me/gitbig/14
+https://t.me/gitbig/1521
+ZDYZ2
+https://sub.tgzdyz2.xyz/sub
+https://t.me/ZDYZ2/5159
+SSR
+（脚本）https://napi.ltd/script/Worker/NapiSSR.js
+（订阅链接）https://napi.ltd/NapiSSR
+
+#图标
+Qure mini
+https://raw.githubusercontent.com/Koolson/Qure/master/Other/Quremini.json
+Qure Color
+https://raw.githubusercontent.com/Koolson/Qure/master/Other/QureColor.json
+
+
+#Telegram 客户端更改中文
+聪聪
+tg://setlanguage?lang=zhcncc
+TG
+tg://setlanguage?lang=zh-hans-raw
+zh_CN 板
+tg://setlanguage?lang=classic-zh-cn
+langCN
+tg://setlanguage?lang=zhlangcn
 
 # 延时测试链接地址
-Google：
+Google
 http://www.gstatic.com/generate_204
 http://www.google-analytics.com/generate_204
 http://www.google.com/generate_204
 http://connectivitycheck.gstatic.com/generate_204
-Apple：
+Apple
 http://captive.apple.com
 http://www.apple.com/library/test/success.html
-MicroSoft：
+MicroSoft
 http://www.msftconnecttest.com/connecttest.txt
-Cloudflare：
+Cloudflare
 http://cp.cloudflare.com
-Firefox：
+Firefox
 http://detectportal.firefox.com/success.txt
-V2ex：
+V2ex
 http://www.v2ex.com/generate_204
-小米：
+小米
 http://connect.rom.miui.com/generate_204
-华为：
+华为
 http://connectivitycheck.platform.hicloud.com/generate_204
-Vivo：
+Vivo
 http://wifi.vivo.com.cn/generate_204
