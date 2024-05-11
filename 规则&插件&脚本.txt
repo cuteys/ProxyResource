@@ -40,14 +40,14 @@ SSR
 （脚本）https://napi.ltd/script/Worker/NapiSSR.js
 （订阅链接）https://napi.ltd/NapiSSR
 
-#图标
+# 图标
 Qure mini
 https://raw.githubusercontent.com/Koolson/Qure/master/Other/Quremini.json
 Qure Color
 https://raw.githubusercontent.com/Koolson/Qure/master/Other/QureColor.json
 
 
-#Telegram 客户端更改中文
+# Telegram 客户端更改中文
 聪聪
 tg://setlanguage?lang=zhcncc
 TG
