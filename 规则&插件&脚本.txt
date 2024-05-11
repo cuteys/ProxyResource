@@ -1,24 +1,34 @@
 # 签到脚本
-🌸Sakura樱花交流会：https://raw.githubusercontent.com/xream/scripts/main/surge/modules/sub-store-scripts/check/entrance.js#concurrency=10&timeout=5000&retries=1
+🌸Sakura樱花交流会：
+https://raw.githubusercontent.com/xream/scripts/main/surge/modules/sub-store-scripts/check/entrance.js#concurrency=10&timeout=5000&retries=1
 
 # 分流、重写、脚本共存
-deezertidal：https://github.com/deezertidal/QuantumultX-Rewrite
-blackmatrix7：https://github.com/blackmatrix7/ios_rule_script
+deezertidal：
+https://github.com/deezertidal/QuantumultX-Rewrite
+blackmatrix7：
+https://github.com/blackmatrix7/ios_rule_script
 
 # iOS APP推荐
-Delta游戏模拟器：https://limbopro.com/archives/Delta-Emulator.html
+Delta游戏模拟器：
+https://limbopro.com/archives/Delta-Emulator.html
 
 #Telegram 客户端更改中文
-聪聪：tg://setlanguage?lang=zhcncc
-TG：tg://setlanguage?lang=zh-hans-raw
-zh_CN 板：tg://setlanguage?lang=classic-zh-cn
-langCN：tg://setlanguage?lang=zhlangcn
+聪聪：
+tg://setlanguage?lang=zhcncc
+TG：
+tg://setlanguage?lang=zh-hans-raw
+zh_CN 板：
+tg://setlanguage?lang=classic-zh-cn
+langCN：
+tg://setlanguage?lang=zhlangcn
 
 # IP优选
-WARP：https://likeable-fuschia-f06.notion.site/Woker-IP-6f734d819a874fdf9ce95ff51120fc93（iOS端ish异常报错）
+WARP：
+https://likeable-fuschia-f06.notion.site/Woker-IP-6f734d819a874fdf9ce95ff51120fc93（iOS端ish异常报错）
 
 # 白嫖
-CF Woker： https://likeable-fuschia-f06.notion.site/CF-Woker-195b0ffa0e624383883739614a666fc3
+CF Woker：
+https://likeable-fuschia-f06.notion.site/CF-Woker-195b0ffa0e624383883739614a666fc3
 
 # 延时测试链接地址
 Google：
