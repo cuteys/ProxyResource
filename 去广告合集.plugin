@@ -1,0 +1,16 @@
+#!name = 去广告合集
+#!desc = 自用的软件去广告
+#!openUrl = 
+#!author = Yancysir
+#!homepage = https://raw.githubusercontent.com/Semporia/Hand-Painted-icon/master/Universal/Reject.orig.png
+#!date = 2024-05-25 15:00:00
+
+[Rewrite]
+# 飞智游戏厅 开屏 需要卸载重装
+^https:\/\/api\.flydigi\.com\/android\/v2\/ad url reject-dict
+
+[Script]
+
+[Mitm]
+# 飞智游戏厅
+hostname = api.flydigi.com
