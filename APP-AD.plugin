@@ -1,8 +1,9 @@
 #!name = 去广告合集
 #!desc = 自用的软件去广告
+#!icon = https://raw.githubusercontent.com/Semporia/Hand-Painted-icon/master/Universal/Reject.orig.png
 #!openUrl = 
 #!author = Yancysir
-#!homepage = https://raw.githubusercontent.com/Semporia/Hand-Painted-icon/master/Universal/Reject.orig.png
+#!homepage = https://github.com/Yancysir/Script
 #!date = 2024-05-25 15:00:00
 
 [Rewrite]
