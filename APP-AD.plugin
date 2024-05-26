@@ -17,9 +17,14 @@ DOMAIN-SUFFIX,tsis.jpush.cn,REJECT
 [Rewrite]
 # 飞智游戏厅 开屏 需要卸载重装
 ^https:\/\/api\.flydigi\.com\/android\/v2\/ad url reject-dict
+# 向日葵 (开屏广告,首页文字广告,发现页广告,首页横幅广告)
+^https:\/\/client-api-v2\.oray\.com\/materials\/SLCC_IOS_STARTUP url reject-dict
+^https:\/\/client-api-v2\.oray\.com\/materials\/SLCC_IOS_DEVICE url reject-dict
+^https:\/\/client-api-v2\.oray\.com\/materials\/SUNLOGIN_CLIENT_IOS_PROMOTION url reject-dict
+^https:\/\/client-api-v2\.oray\.com\/materials\/SLCC_iOS_DEVICE_FR url reject-dict
 
 [Script]
 
 [Mitm]
-# 飞智游戏厅
-hostname = api.flydigi.com
+# 飞智游戏厅,向日葵
+hostname = api.flydigi.com,client-api-v2.oray.com
