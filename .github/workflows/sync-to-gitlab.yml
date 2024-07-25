@@ -3,7 +3,7 @@ name: Sync to GitLab
 on:
   push:
     branches:
-      - main  # 或其他你希望同步的分支
+      - '*'
 
 jobs:
   sync:
@@ -13,7 +13,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
       with:
-        fetch-depth: 0  # 拉取所有历史记录
+        fetch-depth: 0
 
     - name: Set up Git
       run: |
@@ -25,10 +25,17 @@ jobs:
         git remote remove gitlab || true
         git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/wmystc/Script.git
 
-    - name: Pull changes from GitLab
-      run: git pull gitlab main --rebase
+    - name: Fetch all branches from GitLab
+      run: git fetch --all
 
-    - name: Push all branches and tags to GitLab
+    - name: Pull and push all branches
       run: |
-        git push gitlab --all
-        git push gitlab --tags
+        for remote_branch in $(git ls-remote --heads gitlab | awk '{print $2}'); do
+          branch=${remote_branch#refs/heads/}
+          git checkout $branch || git checkout -b $branch
+          git pull gitlab $branch --rebase
+          git push gitlab $branch
+        done
+
+    - name: Push all tags to GitLab
+      run: git push gitlab --tags
