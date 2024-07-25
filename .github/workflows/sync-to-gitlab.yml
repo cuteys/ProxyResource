@@ -12,6 +12,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
+      with:
+        fetch-depth: 0  # 拉取所有历史记录
 
     - name: Set up Git
       run: |
@@ -22,6 +24,9 @@ jobs:
       run: |
         git remote remove gitlab || true
         git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/wmystc/Script.git
+
+    - name: Pull changes from GitLab
+      run: git pull gitlab main --rebase
 
     - name: Push all branches and tags to GitLab
       run: |
