@@ -1,9 +1,9 @@
-#!name = 广告过滤器
+#!name = wmystc 的广告过滤器
 #!desc = 个人收集的去广告重写及脚本
-#!author = Yancysir
-#!homepage = https://github.com/Yancysir/Script
+#!author = wmystc
+#!homepage = https://github.com/wmystc/Script
 #!icon = https://raw.githubusercontent.com/Semporia/Hand-Painted-icon/master/Universal/Reject.png
-#!date = 2024-07-20 03:30
+#!date = 2024-07-27
 
 [Rule]
 # 智趣校园
