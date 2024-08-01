@@ -1,9 +1,9 @@
-#!name = wmystc 广告过滤器
+#!name = cuteys 广告过滤器
 #!desc = 个人收集的去广告重写及脚本
-#!author = wmystc
-#!homepage = https://github.com/wmystc/Script
+#!author = cuteys
+#!homepage = https://github.com/cuteys/Script
 #!icon = https://raw.githubusercontent.com/Semporia/Hand-Painted-icon/master/Universal/Reject.png
-#!date = 2024-07-27
+#!date = 2024-08-01
 
 [Rule]
 # 智趣校园
