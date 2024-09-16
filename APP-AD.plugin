@@ -1,9 +1,14 @@
-#!name = cuteys 广告过滤器
+#!name = Cuteys 广告过滤器
 #!desc = 个人收集的去广告重写及脚本
-#!author = cuteys
+#!openUrl = 
+#!author = Cuteys[https://github.com/cuteys]
+#!tag = 去广告
+#!system = iOS, iPadOS, tvOS, macOS
+#!system_version = 14
+#!loon_version = 3.2.1(745)
 #!homepage = https://github.com/cuteys/Script
 #!icon = https://raw.githubusercontent.com/Semporia/Hand-Painted-icon/master/Universal/Reject.png
-#!date = 2024-08-01
+#!date = 2024-09-16 16:27:55
 
 [Rule]
 # 智趣校园
