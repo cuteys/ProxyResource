@@ -1,0 +1,38 @@
+#!name = 定时任务
+#!desc = 🐈自用的定时任务
+#!openUrl = 
+#!author = cuteys[https://github.com/cuteys]
+#!tag = 定时任务
+#!system = iOS, iPadOS
+#!system_version = 
+#!loon_version = 3.2.3(753)
+#!homepage = https://github.com/cuteys/vpn_tool
+#!icon = https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/cuteys_small.png
+#!date = 2024-09-18 20:56:32
+
+[Argument]
+arg1 = input,"0 0 12 * * ?",tag=哔哩哔哩每日任务时间
+arg2 = switch,true,tag=哔哩哔哩每日任务开关
+arg3 = input,"0 0 12 * * ?",tag=天翼云盘每日签到时间
+arg4 = switch,true,tag=天翼云盘每日签到开关
+arg5 = input,"0 0 11 * * ?",tag=阿里云每日任务时间
+arg6 = switch,true,tag=阿里云每日任务开关
+arg7 = input,"0 0 13 * * ?",tag=阿里云领取积分时间
+arg8 = switch,true,tag=阿里云领取积分开关
+arg9 = input,"0 0 12 * * ?",tag=美团签到时间
+arg10 = switch,true,tag=美团签到开关
+arg11 = input,"0 0 12 * * ?",tag=携程旅行签到时间
+arg12 = switch,true,tag=携程旅行签到开关
+arg13 = input,"0 0 12 * * ?",tag=微付金币领取时间
+arg14 = switch,true,tag=微付金币领取开关
+
+[Script]
+cron {arg1} script-path=https://raw.githubusercontent.com/ClydeTime/Quantumult/main/Script/Task/BiliBili.js, timeout=60, enable= {arg2}, tag=哔哩哔哩每日任务, img-url=https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Bilibili.png
+cron {arg3} script-path=https://raw.githubusercontent.com/MCdasheng/QuantumultX/main/Scripts/myScripts/ty.js, timeout=60, enable= {arg4}, tag=天翼云盘签到, img-url=https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/TianyiCloudDisk.png
+cron {arg5} script-path=https://raw.githubusercontent.com/leiyiyan/resource/main/script/aliyun_web/aliyun_web.js, timeout=60, enable= {arg6}, tag=阿里云每日任务, img-url=https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/AlibabaCloud.png
+cron {arg7} script-path=https://raw.githubusercontent.com/leiyiyan/resource/main/script/aliyun_web/aliyun_web.js, timeout=60, enable= {arg8}, tag=阿里云领取积分, img-url=https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/AlibabaCloud.png
+cron {arg9} script-path=https://raw.githubusercontent.com/chavyleung/scripts/master/meituan/meituan.js, timeout=60, enable= {arg10}, tag=美团签到, img-url=https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/MeiTuanItakeaway.png
+cron {arg11} script-path=https://raw.githubusercontent.com/NobyDa/Script/master/Ctrip-DailyBonus/Ctrip.js, timeout=60, enable= {arg12}, tag=携程旅行签到, img-url=https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/Ctrip.png
+cron {arg13} script-path=https://raw.githubusercontent.com/FoKit/Scripts/main/scripts/wechat_pay_coupon.js, timeout=60, enable= {arg14}, tag=微付金币领取, img-url=https://raw.githubusercontent.com/FoKit/Scripts/main/images/wechat_pay_coupon.png
+
+[MITM]

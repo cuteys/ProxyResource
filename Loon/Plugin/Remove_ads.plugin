@@ -7,7 +7,7 @@
 #!system_version = 14
 #!loon_version = 3.2.1(745)
 #!homepage = https://github.com/cuteys/vpn_tool
-#!icon = https://raw.githubusercontent.com/Semporia/Hand-Painted-icon/master/Universal/Reject.png
+#!icon = https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/cuteys_small.png
 #!date = 2024-09-16 20:14:30
 
 [Rule]
