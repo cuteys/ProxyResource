@@ -1,4 +1,4 @@
-name: Sync to GitLab
+name: Sync to Bitbucket
 
 on:
   push:
@@ -20,22 +20,22 @@ jobs:
         git config --global user.name "cuteys"
         git config --global user.email "117161372+cuteys@users.noreply.github.com"
 
-    - name: Add GitLab remote
+    - name: Add Bitbucket remote
       run: |
-        git remote remove gitlab || true
-        git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/cuteys/vpn_tool.git
+        git remote remove bitbucket || true
+        git remote add bitbucket https://x-token-auth:${{ secrets.BITBUCKET_TOKEN }}@bitbucket.org/cuteys_king/vpn_tool.git
 
-    - name: Fetch all branches from GitLab
+    - name: Fetch all branches from Bitbucket
       run: git fetch --all
 
     - name: Pull and push all branches
       run: |
-        for remote_branch in $(git ls-remote --heads gitlab | awk '{print $2}'); do
+        for remote_branch in $(git ls-remote --heads bitbucket | awk '{print $2}'); do
           branch=${remote_branch#refs/heads/}
           git checkout $branch || git checkout -b $branch
-          git pull gitlab $branch --rebase
-          git push gitlab $branch
+          git pull bitbucket $branch --rebase
+          git push bitbucket $branch
         done
 
-    - name: Push all tags to GitLab
-      run: git push gitlab --tags
+    - name: Push all tags to Bitbucket
+      run: git push bitbucket --tags
