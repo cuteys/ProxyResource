@@ -8,23 +8,24 @@
 #!loon_version = 3.2.3(753)
 #!homepage = https://github.com/cuteys/ProxyResource
 #!icon = https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/cuteys_small.png
-#!date = 2024-09-19 08:51:25
+#!date = 2024-09-20 00:42:35
+# 本插件中的所有脚本均为个人收集整合，非本人制作。引用脚本的版权归原作者所有，若有任何版权问题或侵权行为，请联系我进行处理。感谢各位原作者的贡献与分享！
 
 [Argument]
 arg1 = input,"0 0 12 * * ?",tag=哔哩哔哩每日任务时间
-arg2 = switch,true,tag=哔哩哔哩每日任务开关
+arg2 = switch,false,tag=哔哩哔哩每日任务开关
 arg3 = input,"0 0 12 * * ?",tag=天翼云盘每日签到时间
-arg4 = switch,true,tag=天翼云盘每日签到开关
+arg4 = switch,false,tag=天翼云盘每日签到开关
 arg5 = input,"0 0 11 * * ?",tag=阿里云每日任务时间
-arg6 = switch,true,tag=阿里云每日任务开关
+arg6 = switch,false,tag=阿里云每日任务开关
 arg7 = input,"0 0 13 * * ?",tag=阿里云领取积分时间
-arg8 = switch,true,tag=阿里云领取积分开关
+arg8 = switch,false,tag=阿里云领取积分开关
 arg9 = input,"0 0 12 * * ?",tag=美团签到时间
-arg10 = switch,true,tag=美团签到开关
+arg10 = switch,false,tag=美团签到开关
 arg11 = input,"0 0 12 * * ?",tag=携程旅行签到时间
-arg12 = switch,true,tag=携程旅行签到开关
+arg12 = switch,false,tag=携程旅行签到开关
 arg13 = input,"0 0 12 * * ?",tag=微付金币领取时间
-arg14 = switch,true,tag=微付金币领取开关
+arg14 = switch,false,tag=微付金币领取开关
 
 [Script]
 cron {arg1} script-path=https://raw.githubusercontent.com/ClydeTime/Quantumult/main/Script/Task/BiliBili.js, timeout=60, enable= {arg2}, tag=哔哩哔哩每日任务, img-url=https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Bilibili.png
