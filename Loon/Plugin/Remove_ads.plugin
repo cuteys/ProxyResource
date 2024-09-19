@@ -1,11 +1,11 @@
 #!name = Cuteys 广告过滤器
-#!desc = 个人收集的去广告重写及脚本
+#!desc = 🐈个人收集的去广告重写及脚本
 #!openUrl = 
 #!author = cuteys[https://github.com/cuteys]
 #!tag = 去广告
 #!system = iOS, iPadOS, tvOS, macOS
-#!system_version = 14
-#!loon_version = 3.2.1(745)
+#!system_version = 
+#!loon_version = 
 #!homepage = https://github.com/cuteys/ProxyResource
 #!icon = https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/cuteys_small.png
 #!date = 2024-09-19 08:51:42
