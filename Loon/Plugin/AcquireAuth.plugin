@@ -6,9 +6,9 @@
 #!system = iOS, iPadOS
 #!system_version = 
 #!loon_version = 3.2.3(753)
-#!homepage = https://github.com/cuteys/vpn_tool
-#!icon = https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/cuteys_small.png
-#!date = 2024-09-18 20:56:20
+#!homepage = https://github.com/cuteys/ProxyResource
+#!icon = https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/cuteys_small.png
+#!date = 2024-09-19 08:51:36
 
 [Argument]
 arg1 = switch,true,tag=哔哩哔哩获取 Cookie
@@ -20,10 +20,10 @@ arg6 = switch,true,tag=微付金币获取 Token
 
 [Script]
 http-request ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://raw.githubusercontent.com/ClydeTime/Quantumult/main/Script/Task/BiliBili.js, timeout=60, enable = {arg1}, tag=哔哩哔哩获取 Cookie, img-url=https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Bilibili.png
-http-request ^https:\/\/api\.cloud\.189\.cn\/mkt\/userSign\.action? script-path=https://raw.githubusercontent.com/MCdasheng/QuantumultX/main/Scripts/myScripts/ty.cookie.js, timeout=60, enable = {arg2}, tag=天翼云盘获取会话, img-url=https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/TianyiCloudDisk.png
-http-response ^https?:\/\/developer\.aliyun\.com\/developer\/api\/my\/user\/getUser script-path=https://raw.githubusercontent.com/leiyiyan/resource/main/script/aliyun_web/aliyun_web.js, requires-body=true, timeout=60, enable = {arg3}, tag=阿里云获取 Cookie, img-url=https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/AlibabaCloud.png
+http-request ^https:\/\/api\.cloud\.189\.cn\/mkt\/userSign\.action? script-path=https://raw.githubusercontent.com/MCdasheng/QuantumultX/main/Scripts/myScripts/ty.cookie.js, timeout=60, enable = {arg2}, tag=天翼云盘获取会话, img-url=https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/TianyiCloudDisk.png
+http-response ^https?:\/\/developer\.aliyun\.com\/developer\/api\/my\/user\/getUser script-path=https://raw.githubusercontent.com/leiyiyan/resource/main/script/aliyun_web/aliyun_web.js, requires-body=true, timeout=60, enable = {arg3}, tag=阿里云获取 Cookie, img-url=https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/AlibabaCloud.png
 http-request ^https:\/\/i.meituan.com\/evolve\/signin\/signpost\/ script-path=https://raw.githubusercontent.com/chavyleung/scripts/master/meituan/meituan.cookie.js, requires-body=true, timeout=60, enable = {arg4}, tag=美团获取 Cookie, img-url=https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/MeiTuanItakeaway.png
-http-response ^https:\/\/m\.ctrip\.com\/restapi\/soa2\/\d+\/[a-zA-Z]+Login(?:$|\?) script-path=https://raw.githubusercontent.com/NobyDa/Script/master/Ctrip-DailyBonus/Ctrip.js, requires-body=true, timeout=60, enable = {arg5}, tag=携程旅行获取 GetAuth, img-url=https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/Ctrip.png
+http-response ^https:\/\/m\.ctrip\.com\/restapi\/soa2\/\d+\/[a-zA-Z]+Login(?:$|\?) script-path=https://raw.githubusercontent.com/NobyDa/Script/master/Ctrip-DailyBonus/Ctrip.js, requires-body=true, timeout=60, enable = {arg5}, tag=携程旅行获取 GetAuth, img-url=https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/Ctrip.png
 http-response https:\/\/payapp\.weixin\.qq\.com\/(coupon-center-user\/home\/login|coupon-center-award\/award\/detail) script-path=https://raw.githubusercontent.com/FoKit/Scripts/main/scripts/wechat_pay_coupon.js, requires-body=true, timeout=60, enable = {arg6}, tag=微付金币获取 Token, img-url=https://raw.githubusercontent.com/FoKit/Scripts/main/images/wechat_pay_coupon.png
 
 [MITM]

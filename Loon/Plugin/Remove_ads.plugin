@@ -6,9 +6,9 @@
 #!system = iOS, iPadOS, tvOS, macOS
 #!system_version = 14
 #!loon_version = 3.2.1(745)
-#!homepage = https://github.com/cuteys/vpn_tool
-#!icon = https://raw.githubusercontent.com/cuteys/vpn_tool/main/icon/cuteys_small.png
-#!date = 2024-09-16 20:14:30
+#!homepage = https://github.com/cuteys/ProxyResource
+#!icon = https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/cuteys_small.png
+#!date = 2024-09-19 08:51:42
 
 [Rule]
 # 智趣校园
