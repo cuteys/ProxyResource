@@ -23,7 +23,7 @@ jobs:
     - name: Add Bitbucket remote
       run: |
         git remote remove bitbucket || true
-        git remote add bitbucket https://x-token-auth:${{ secrets.BITBUCKET_TOKEN }}@bitbucket.org/cuteys_king/vpn_tool.git
+        git remote add bitbucket https://cuteys:${{ secrets.BITBUCKET_TOKEN }}@bitbucket.org/cuteys_king/vpn_tool.git
 
     - name: Fetch all branches from Bitbucket
       run: git fetch --all
