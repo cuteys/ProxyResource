@@ -9,67 +9,67 @@
 #!homepage = https://github.com/cuteys/ProxyResource
 #!icon = https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/cuteys_small.png
 #!date = 2024-09-19 09:24:05
-# 源于 https://raw.githubusercontent.com/Softlyx/QuantumultX/main/AdBlock/WebAd.conf 修改为Loon插件
+// 源于 https://raw.githubusercontent.com/Softlyx/QuantumultX/main/AdBlock/WebAd.conf 修改为Loon插件
 
 [Rewrite]
-# 谷歌服务重定向 //*.google.cn
+// 谷歌服务重定向 //*.google.cn
 ^https:\/\/www\.google\.cn https://www.google.com 302
 ^https:\/\/translate\.google\.cn https://translate.google.com 302
 
 [Script]
-## 知道搜索广告
+// 知道搜索广告
 http-response ^https:\/\/zhidao\.baidu\.com\/(question|index|\?fr|\?word) script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/webpage/baidu-zhidao.js, requires-body=true, timeout=60, tag=baidu-zhidao
 
-## 搜索首页广告
+// 搜索首页广告
 http-response ^https:\/\/(www|m)\.baidu\.com(\/$|\/\?(ref|from).*) script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/webpage/baidu-index.js, requires-body=true, timeout=60, tag=baidu-index
 
-## 搜索结果广告
+// 搜索结果广告
 http-response ^https:\/\/(www|m)\.baidu\.com\/.*word=.* script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/webpage/baidu.js, requires-body=true, timeout=60, tag=baidu
 
-## 百度防跳转
+// 百度防跳转
 http-response ^https:\/\/boxer\.baidu\.com\/scheme\?scheme script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/baidu/baiduNoRedirect.js, timeout=60, tag=baiduNoRedirect
 
-# 内容农场(bing) //www.bing.com
+// 内容农场(bing) //www.bing.com
 http-response ^https:\/\/(www\.bing)(\.\w{2,4}){1,2}\/(search\?.*|\?sa=|\?FORM)(?!.*?(apps=)).* script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/limbo/Adblock4limboQX.js, requires-body=true, timeout=60, tag=Adblock4limboQX
 
 http-response ^https:\/\/dyncdn\.me\/static\/\d{0,2}\/js\/showads\.js$ script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=true-%3Efalse
 
-# 天天视频 (http://www.ttsp.tv/) //www.ttsp.tv
+// 天天视频 (http://www.ttsp.tv/) //www.ttsp.tv
 http-response ^https?:\/\/(\w{0,3}(\.){0,1}(ttsp)(\.)\w{0,3})(?!.*?(\.webmanifest|/(cdn-cgi)))(?!.*?(\.(css|js|jpeg|jpg|png|php|gif|ico|mp3|mp4|svg|tff|PNG|woff|woff2|m3u8))).* script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/limbo/Adblock4limboQX.js, requires-body=true, timeout=60, tag=Adblock4limboQX
 
-# 低端影视 (https://ddys.tv/) //ddrk.me, ddys.tv, ddys2.me
+// 低端影视 (https://ddys.tv/) //ddrk.me, ddys.tv, ddys2.me
 http-response ^https?:\/\/(\w{0,3}(\.){0,1}(ddys|ddrk|ddys2)(\.)\w{0,3})(?!.*?(\.webmanifest|/(cdn-cgi)))(?!.*?(\.(css|js|jpeg|jpg|png|php|gif|ico|mp3|mp4|svg|tff|PNG|woff|woff2|m3u8))).* script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/limbo/Adblock4limboQX.js, requires-body=true, timeout=60, tag=Adblock4limboQX
 
-# 大师兄影视 (https://dsxys.com/) //dsxys.com
+// 大师兄影视 (https://dsxys.com/) //dsxys.com
 http-response ^https?:\/\/(\w{0,3}(\.){0,1}(dsxys)(\.)\w{0,3})(?!.*?(\.webmanifest|/(cdn-cgi)))(?!.*?(\.(css|js|jpeg|jpg|png|php|gif|ico|mp3|mp4|svg|tff|PNG|woff|woff2|m3u8))).* script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=%3Chead%3E-%3E%3Chead%3E%3Clink%20rel%3D%22stylesheet%22%20href%3D%22https%3A%2F%2Fraw.githubusercontent.com%2FRuCu6%2FQuanX%2Fmain%2FCss%2Fdsxys.css%22%20type%3D%22text%2Fcss%22%3E
 
-# 哔嘀影视 (https://www.bdys01.com/) //*bdys*
+// 哔嘀影视 (https://www.bdys01.com/) //*bdys*
 http-response ^https?:\/\/(\w{0,3}(\.){0,1}(bdys\w{0,3})(\.)\w{0,3})\/play\/.*?\.htm.* script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/limbo/Adblock4limboQX.js, requires-body=true, timeout=60, tag=Adblock4limboQX
 
 http-response ^https?:\/\/(\w{0,3}(\.){0,1}(bdys\w{0,3})(\.)\w{0,3})(?!.*?(/(cdn-cgi|verifyCode|member\/|zzzzz)))(?!.*?(\.(css|js|jpeg|jpg|png|php|gif|ico|mp3|mp4|svg|tff|PNG|woff|woff2|m3u8|ddr))).* script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/limbo/Adblock4limboQX.js, requires-body=true, timeout=60, tag=Adblock4limboQX
 
-# 茶杯狐 (https://cupfox.app/) //cupfox.app
+// 茶杯狐 (https://cupfox.app/) //cupfox.app
 http-response ^https?:/\/cupfox\.app\/($|(search|list).*$) script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=%3Chead%3E-%3E%3Chead%3E%3Clink%20rel%3D%22stylesheet%22%20href%3D%22https%3A%2F%2Fraw.githubusercontent.com%2FRuCu6%2FQuanX%2Fmain%2FCss%2Fcupfox.css%22%20type%3D%22text%2Fcss%22%3E
 
-# Cokemv (https://cokemv.me/) //cokemv.me
+// Cokemv (https://cokemv.me/) //cokemv.me
 http-response ^https?:/\/cokemv\.me\/($|vod.*$) script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=%3Chead%3E-%3E%3Chead%3E%3Clink%20rel%3D%22stylesheet%22%20href%3D%22https%3A%2F%2Fraw.githubusercontent.com%2FRuCu6%2FQuanX%2Fmain%2FCss%2Fcokemv.css%22%20type%3D%22text%2Fcss%22%3E
 
-# 555 影视 (https://555yy6.com/) //*5yy*
+// 555 影视 (https://555yy6.com/) //*5yy*
 http-response ^https?:\/\/.*5yy.*\/($|[0-9a-zA-Z=_/-]+\.html$) script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=%3Chead%3E-%3E%3Chead%3E%3Clink%20rel%3D%22stylesheet%22%20href%3D%22https%3A%2F%2Fraw.githubusercontent.com%2FRuCu6%2FQuanX%2Fmain%2FCss%2F555.css%22%20type%3D%22text%2Fcss%22%3E
 
-# 剧迷网 (https://gimytv.app/) //*gimytv*
+// 剧迷网 (https://gimytv.app/) //*gimytv*
 http-response ^https?:\/\/(\w{0,3}(\.){0,1}(gimytv)(\.)\w{0,3})(?!.*?(/(cdn-cgi)))(?!.*?(\.(css|js|jpeg|jpg|png|php|gif|ico|mp3|mp4|svg|tff|PNG|woff|woff2|m3u8))).* script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/limbo/gimytvQX.js, requires-body=true, timeout=60, tag=gimytvQX
 
-# 天空影视 (https://www.tkys.vip/) //*tkznp*
+// 天空影视 (https://www.tkys.vip/) //*tkznp*
 http-response ^https?:\/\/.*tkznp.*com\/($|[0-9a-zA-Z=_/-]+\.html$) script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=%3Chead%3E-%3E%3Chead%3E%3Clink%20rel%3D%22stylesheet%22%20href%3D%22https%3A%2F%2Fraw.githubusercontent.com%2FRuCu6%2FQuanX%2Fmain%2FCss%2Ftkys.css%22%20type%3D%22text%2Fcss%22%3E
 
-# 厂长电影 (https://www.czspp.com/) //*czspp*
+// 厂长电影 (https://www.czspp.com/) //*czspp*
 http-response ^https?:/\/.*czspp.*com\/($|\?btwaf=\w+$|[0-9a-zA-Z=_/-]+\.html) script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=%3Chead%3E-%3E%3Chead%3E%3Clink%20rel%3D%22stylesheet%22%20href%3D%22https%3A%2F%2Fraw.githubusercontent.com%2FRuCu6%2FQuanX%2Fmain%2FCss%2Fqianoo.css%22%20type%3D%22text%2Fcss%22%3E
 
-# 真不卡影院 (https://www.ikandy.fun/) //*ikandy*
+// 真不卡影院 (https://www.ikandy.fun/) //*ikandy*
 http-response ^https?:\/\/.*ikandy.*fun\/($|(vod|top).*$) script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=%3Chead%3E-%3E%3Chead%3E%3Clink%20rel%3D%22stylesheet%22%20href%3D%22https%3A%2F%2Fraw.githubusercontent.com%2FRuCu6%2FQuanX%2Fmain%2FCss%2Fzhenbuka.css%22%20type%3D%22text%2Fcss%22%3E
 
-# 梨播 libvio (https://www.iioo.me/) //www.libvio.fun
+// 梨播 libvio (https://www.iioo.me/) //www.libvio.fun
 http-response ^https?:\/\/(\w{0,3}(\.){0,1}(libvio)(\.)\w{0,3})(?!.*?(/(cdn-cgi)))(?!.*?(\.(css|js|jpeg|jpg|png|php|gif|ico|mp3|mp4|svg|tff|PNG|woff|woff2|m3u8))).* script-path=https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js, requires-body=true, timeout=30, tag=replaceBody, argument=%3Chead%3E-%3E%3Chead%3E%3Clink%20rel%3D%22stylesheet%22%20href%3D%22https%3A%2F%2Fraw.githubusercontent.com%2FRuCu6%2FQuanX%2Fmain%2FCss%2Flibvio.css%22%20type%3D%22text%2Fcss%22%3E
 
 [MITM]
