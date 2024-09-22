@@ -68,3 +68,7 @@
 [GitHub 仓库](https://github.com/luestr/ProxyResource) - 需要代理访问
 
 [Bitbucket 仓库](https://bitbucket.org/luestr/proxyresource) - 电信、联通、移动、广电均可直连访问
+
+> 可莉大佬的 Loon 配置文件更新记录
+
+可前往[提交记录](https://github.com/cuteys/ProxyResource/commits/main/Loon/Config/zh-CN/Loon_Simple_Sample_Configuration_By_iKeLee.conf)查看详细信息
