@@ -15,7 +15,7 @@
 > [!TIP]
 > 如果仓库的资源有任何问题，可以通过以下方式联系我。
 
-📲 通过 Telegram 联系我:[@cuteys_king](https://t.me/cuteys_king)
+📲 通过 Telegram 联系我:[@cuteysking](https://t.me/cuteysking)
 
 📫 通过邮箱联系我:[email@996977.xyz](mailto:email@996977.xyz)、[marker.peg.0s@icloud.com](mailto:marker.peg.0s@icloud.com)
 
