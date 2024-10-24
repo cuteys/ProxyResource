@@ -28,7 +28,7 @@ arg13 = input,"0 0 12 * * ?",tag=微付金币领取时间
 arg14 = switch,false,tag=微付金币领取开关
 
 [Script]
-cron {arg1} script-path=https://raw.githubusercontent.com/ClydeTime/Quantumult/main/Script/Task/BiliBili.js, timeout=60, enable= {arg2}, tag=哔哩哔哩每日任务, img-url=https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Bilibili.png
+cron {arg1} script-path=https://raw.githubusercontent.com/ClydeTime/BiliBili/main/js/BiliBiliDailyBonus.js, timeout=60, enable= {arg2}, tag=哔哩哔哩每日任务, img-url=https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Bilibili.png
 cron {arg3} script-path=https://raw.githubusercontent.com/MCdasheng/QuantumultX/main/Scripts/myScripts/ty.js, timeout=60, enable= {arg4}, tag=天翼云盘签到, img-url=https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/TianyiCloudDisk.png
 cron {arg5} script-path=https://raw.githubusercontent.com/leiyiyan/resource/main/script/aliyun_web/aliyun_web.js, timeout=60, enable= {arg6}, tag=阿里云每日任务, img-url=https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/AlibabaCloud.png
 cron {arg7} script-path=https://raw.githubusercontent.com/leiyiyan/resource/main/script/aliyun_web/aliyun_web.js, timeout=60, enable= {arg8}, tag=阿里云领取积分, img-url=https://raw.githubusercontent.com/cuteys/ProxyResource/main/icon/AlibabaCloud.png
