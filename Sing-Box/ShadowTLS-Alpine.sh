@@ -35,7 +35,7 @@ is_sing_box_installed() {
 
 # 检查 sing-box 运行状态
 is_sing_box_running() {
-    systemctl is-active --quiet "${SERVICE_NAME}"
+    rc-service "${SERVICE_NAME}" status &> /dev/null
     return $?
 }
 
@@ -43,24 +43,7 @@ is_sing_box_running() {
 check_ss_command() {
     if ! command -v ss &> /dev/null; then
         echo -e "${YELLOW}ss 命令未找到，正在尝试自动安装 iproute2 ${RESET}"
-        
-        # 检测包管理器并安装
-        if command -v apt-get &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y iproute2
-        elif command -v yum &> /dev/null; then
-            sudo yum install -y iproute
-        elif command -v dnf &> /dev/null; then
-            sudo dnf install -y iproute
-        elif command -v pacman &> /dev/null; then
-            sudo pacman -Sy --noconfirm iproute2
-        elif command -v zypper &> /dev/null; then
-            sudo zypper install -y iproute2
-        else
-            echo -e "${RED}无法检测到支持的包管理器，请手动安装 iproute2 包${RESET}"
-            exit 1
-        fi
-        
-        # 再次检查是否安装成功
+        apk update && apk add iproute2
         if command -v ss &> /dev/null; then
             echo -e "${GREEN}iproute2 安装成功，ss 命令已可用${RESET}"
         else
@@ -113,11 +96,23 @@ install_sing_box() {
     # 检查 ss 命令是否可用
     check_ss_command
 
-    # 下载并运行 sing-box 安装脚本
-    bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
-        echo -e "${RED}sing-box 安装失败！请检查网络连接或安装脚本来源。${RESET}"
-        exit 1
-    }
+    # 启用 edge 和 testing 存储库
+    echo "启用 edge 和 testing 存储库..."
+    if ! grep -q "edge/testing" /etc/apk/repositories; then
+        echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
+    fi
+
+    # 更新 apk 索引
+    apk update
+
+    # 安装 sing-box
+    apk add sing-box
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}sing-box 安装成功${RESET}"
+    else
+        echo -e "${RED}sing-box 安装失败，请检查错误信息${RESET}"
+    fi
 
     # 获取端口参数，确保端口在有效范围内
     ssport=$(get_valid_port "请输入 Shadowsocks 端口（ssport，1-65535）：")
@@ -191,12 +186,12 @@ install_sing_box() {
 EOF
 
     # 启用并启动 sing-box 服务
-    systemctl enable "${SERVICE_NAME}" || {
+    rc-update add "${SERVICE_NAME}" default || {
         echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}"
         exit 1
     }
 
-    systemctl start "${SERVICE_NAME}" || {
+    rc-service "${SERVICE_NAME}" start || {
         echo -e "${RED}无法启动 ${SERVICE_NAME} 服务！${RESET}"
         exit 1
     }
@@ -204,7 +199,7 @@ EOF
     # 检查服务状态
     if ! is_sing_box_running; then
         echo -e "${RED}${SERVICE_NAME} 服务未成功启动！${RESET}"
-        systemctl status "${SERVICE_NAME}"
+        rc-service "${SERVICE_NAME}" status
         exit 1
     fi
 
@@ -246,35 +241,31 @@ uninstall_sing_box() {
         y|Y)
             echo -e "${CYAN}正在卸载 sing-box${RESET}"
 
-            # 停止 sing-box 服务
-            systemctl stop "${SERVICE_NAME}" || {
+            # 停止服务
+            rc-service "${SERVICE_NAME}" stop || {
                 echo -e "${RED}停止 sing-box 服务失败。${RESET}"
             }
-
-            # 禁用 sing-box 服务
-            systemctl disable "${SERVICE_NAME}" || {
+            
+            # 禁用服务
+            rc-update del "${SERVICE_NAME}" default || {
                 echo -e "${RED}禁用 sing-box 服务失败。${RESET}"
             }
 
-            # 卸载 sing-box
-            dpkg --purge sing-box || {
-                echo -e "${YELLOW}无法通过 dpkg 卸载 sing-box，可能未通过 apt 安装。${RESET}"
+            # 卸载 sing-box（假设通过 apk 安装）
+            apk del sing-box || {
+                echo -e "${YELLOW}无法通过 apk 卸载 sing-box，可能未通过 apk 安装。${RESET}"
             }
 
             # 删除配置文件和日志
             rm -rf "${CONFIG_DIR}" || {
                 echo -e "${YELLOW}无法删除 ${CONFIG_DIR}。${RESET}"
             }
+
             rm -f "${LOG_FILE}" || {
                 echo -e "${YELLOW}无法删除 ${LOG_FILE}。${RESET}"
             }
 
-            # 重新加载 systemd
-            systemctl daemon-reload || {
-                echo -e "${YELLOW}无法重新加载 systemd 守护进程。${RESET}"
-            }
-
-            # 删除 sing-box 可执行文件，如果存在
+            # 删除 sing-box 可执行文件（如存在）
             if [ -f "/usr/local/bin/sing-box" ]; then
                 rm /usr/local/bin/sing-box || {
                     echo -e "${YELLOW}无法删除 /usr/local/bin/sing-box。${RESET}"
@@ -291,7 +282,7 @@ uninstall_sing_box() {
 
 # 启动 sing-box
 start_sing_box() {
-    systemctl start "${SERVICE_NAME}"
+    rc-service "${SERVICE_NAME}" start
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}${SERVICE_NAME} 服务成功启动${RESET}"
     else
@@ -301,7 +292,7 @@ start_sing_box() {
 
 # 停止 sing-box
 stop_sing_box() {
-    systemctl stop "${SERVICE_NAME}"
+    rc-service "${SERVICE_NAME}" stop
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}${SERVICE_NAME} 服务成功停止${RESET}"
     else
@@ -311,7 +302,7 @@ stop_sing_box() {
 
 # 重启 sing-box
 restart_sing_box() {
-    systemctl restart "${SERVICE_NAME}"
+    rc-service "${SERVICE_NAME}" restart
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}${SERVICE_NAME} 服务成功重启${RESET}"
     else
@@ -321,7 +312,7 @@ restart_sing_box() {
 
 # 查看 sing-box 状态
 status_sing_box() {
-    systemctl status "${SERVICE_NAME}"
+    rc-service "${SERVICE_NAME}" status
 }
 
 # 查看 sing-box 日志
