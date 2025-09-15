@@ -97,10 +97,12 @@ install_sing_box() {
     check_ss_command
 
     # 启用 edge 和 testing 存储库
-    echo "启用 edge 和 testing 存储库..."
-    if ! grep -q "edge/testing" /etc/apk/repositories; then
-        echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
-    fi
+    echo "启用 edge/community 和 edge/testing 仓库..."
+    for repo in community testing; do
+        if ! grep -q "edge/$repo" /etc/apk/repositories; then
+            echo "https://dl-cdn.alpinelinux.org/alpine/edge/$repo" >> /etc/apk/repositories
+        fi
+    done
 
     # 更新 apk 索引
     apk update
