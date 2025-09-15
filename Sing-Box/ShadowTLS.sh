@@ -12,7 +12,6 @@ RESET='\033[0m'
 # 定义常量
 CONFIG_DIR="/etc/sing-box"
 CONFIG_FILE="${CONFIG_DIR}/config.json"
-LOG_FILE="/var/log/singbox.log"
 SERVICE_NAME="sing-box"
 CLIENT_CONFIG_FILE="${CONFIG_DIR}/client.txt"
 
@@ -136,8 +135,7 @@ install_sing_box() {
 {
   "log": {
     "level": "info",
-    "timestamp": true,
-    "output": "${LOG_FILE}"
+    "timestamp": true
   },
   "dns": {
     "servers": [
@@ -326,7 +324,7 @@ status_sing_box() {
 
 # 查看 sing-box 日志
 log_sing_box() {
-    cat "${LOG_FILE}"
+    journalctl -u sing-box --no-pager -n 100
 }
 
 
