@@ -15,6 +15,12 @@ CONFIG_FILE="${CONFIG_DIR}/config.json"
 SERVICE_NAME="sing-box"
 CLIENT_CONFIG_FILE="${CONFIG_DIR}/client.txt"
 
+# 检测是否为 Alpine Linux
+IS_ALPINE=0
+if [ -f /etc/alpine-release ]; then
+    IS_ALPINE=1
+fi
+
 # 检查 root 权限
 check_root() {
     if [ "$(id -u)" != "0" ]; then
@@ -34,7 +40,11 @@ is_sing_box_installed() {
 
 # 检查 sing-box 运行状态
 is_sing_box_running() {
-    systemctl is-active --quiet "${SERVICE_NAME}"
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        rc-service "${SERVICE_NAME}" status &> /dev/null
+    else
+        systemctl is-active --quiet "${SERVICE_NAME}"
+    fi
     return $?
 }
 
@@ -44,7 +54,9 @@ check_ss_command() {
         echo -e "${YELLOW}ss 命令未找到，正在尝试自动安装 iproute2 ${RESET}"
         
         # 检测包管理器并安装
-        if command -v apt-get &> /dev/null; then
+        if [ "$IS_ALPINE" -eq 1 ]; then
+            apk update && apk add iproute2
+        elif command -v apt-get &> /dev/null; then
             sudo apt-get update && sudo apt-get install -y iproute2
         elif command -v yum &> /dev/null; then
             sudo yum install -y iproute
@@ -63,7 +75,7 @@ check_ss_command() {
         if command -v ss &> /dev/null; then
             echo -e "${GREEN}iproute2 安装成功，ss 命令已可用${RESET}"
         else
-            echo -e "${RED}自动安装失败，请手动安装 iproute2 包${RESET}"
+            echo -e "${RED}自动安装失败，请手动安装 iproute2 / iproute 包${RESET}"
             exit 1
         fi
     else
@@ -75,9 +87,9 @@ check_ss_command() {
 is_port_in_use() {
     local port=$1
     if ss -tuln | grep -q ":$port "; then
-        return 0  # 端口被占用
+        return 0
     else
-        return 1  # 端口未占用
+        return 1
     fi
 }
 
@@ -112,15 +124,31 @@ install_sing_box() {
     # 检查 ss 命令是否可用
     check_ss_command
 
-    # 下载并运行 sing-box 安装脚本
-    bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
-        echo -e "${RED}sing-box 安装失败！请检查网络连接或安装脚本来源。${RESET}"
-        exit 1
-    }
+    # 根据系统安装 sing-box
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        echo -e "${YELLOW}检测到 Alpine Linux，使用 apk 安装...${RESET}"
+        for repo in community testing; do
+            if ! grep -q "edge/$repo" /etc/apk/repositories; then
+                echo "https://dl-cdn.alpinelinux.org/alpine/edge/$repo" >> /etc/apk/repositories
+            fi
+        done
+        apk update
+        apk add sing-box
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}sing-box 安装失败，请检查错误信息${RESET}"
+            exit 1
+        fi
+    else
+        # 标准 Linux 安装
+        bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
+            echo -e "${RED}sing-box 安装失败！请检查网络连接或安装脚本来源。${RESET}"
+            exit 1
+        }
+    fi
 
-    # 获取端口参数，确保端口在有效范围内
-    ssport=$(get_valid_port "请输入 Shadowsocks 端口（ssport，1-65535）：")
+    # 获取端口参数
     sport=$(get_valid_port "请输入 ShadowTLS 端口（sport，1-65535）：")
+    ssport=$(get_valid_port "请输入 Shadowsocks 端口（ssport，1-65535）：")
 
     # 生成密码
     ss_password=$(sing-box generate rand 16 --base64)
@@ -140,11 +168,13 @@ install_sing_box() {
   "dns": {
     "servers": [
       {
-        "address": "https://1.1.1.1/dns-query",
+        "type": "https",
+        "server": "1.1.1.1",
         "strategy": "prefer_ipv4"
       },
       {
-        "address": "https://8.8.8.8/dns-query",
+        "type": "https",
+        "server": "8.8.8.8",
         "strategy": "prefer_ipv4"
       }
     ]
@@ -189,20 +219,30 @@ install_sing_box() {
 EOF
 
     # 启用并启动 sing-box 服务
-    systemctl enable "${SERVICE_NAME}" || {
-        echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}"
-        exit 1
-    }
-
-    systemctl start "${SERVICE_NAME}" || {
-        echo -e "${RED}无法启动 ${SERVICE_NAME} 服务！${RESET}"
-        exit 1
-    }
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        rc-update add "${SERVICE_NAME}" default || {
+            echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}"
+            exit 1
+        }
+        rc-service "${SERVICE_NAME}" start || {
+            echo -e "${RED}无法启动 ${SERVICE_NAME} 服务！${RESET}"
+            exit 1
+        }
+    else
+        systemctl enable "${SERVICE_NAME}" || {
+            echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}"
+            exit 1
+        }
+        systemctl start "${SERVICE_NAME}" || {
+            echo -e "${RED}无法启动 ${SERVICE_NAME} 服务！${RESET}"
+            exit 1
+        }
+    fi
 
     # 检查服务状态
     if ! is_sing_box_running; then
         echo -e "${RED}${SERVICE_NAME} 服务未成功启动！${RESET}"
-        systemctl status "${SERVICE_NAME}"
+        if [ "$IS_ALPINE" -eq 1 ]; then rc-service "${SERVICE_NAME}" status; else systemctl status "${SERVICE_NAME}"; fi
         exit 1
     fi
 
@@ -239,44 +279,28 @@ EOF
 
 uninstall_sing_box() {
     read -p "$(echo -e "${RED}确定要卸载 sing-box 吗? (Y/n) ${RESET}")" choice
-    choice=${choice:-Y}  # 默认设置为 Y
+    choice=${choice:-Y}
     case "${choice}" in
         y|Y)
             echo -e "${CYAN}正在卸载 sing-box${RESET}"
 
-            # 停止 sing-box 服务
-            systemctl stop "${SERVICE_NAME}" || {
-                echo -e "${RED}停止 sing-box 服务失败。${RESET}"
-            }
+            if [ "$IS_ALPINE" -eq 1 ]; then
+                rc-service "${SERVICE_NAME}" stop || echo -e "${RED}停止 sing-box 服务失败。${RESET}"
+                rc-update del "${SERVICE_NAME}" default || echo -e "${RED}禁用 sing-box 服务失败。${RESET}"
+                apk del sing-box || echo -e "${YELLOW}无法通过 apk 卸载 sing-box。${RESET}"
+            else
+                systemctl stop "${SERVICE_NAME}" || echo -e "${RED}停止 sing-box 服务失败。${RESET}"
+                systemctl disable "${SERVICE_NAME}" || echo -e "${RED}禁用 sing-box 服务失败。${RESET}"
+                dpkg --purge sing-box || echo -e "${YELLOW}可能未通过 apt 安装，跳过 dpkg 卸载。${RESET}"
+                systemctl daemon-reload
+            fi
 
-            # 禁用 sing-box 服务
-            systemctl disable "${SERVICE_NAME}" || {
-                echo -e "${RED}禁用 sing-box 服务失败。${RESET}"
-            }
-
-            # 卸载 sing-box
-            dpkg --purge sing-box || {
-                echo -e "${YELLOW}无法通过 dpkg 卸载 sing-box，可能未通过 apt 安装。${RESET}"
-            }
-
-            # 删除配置文件和日志
-            rm -rf "${CONFIG_DIR}" || {
-                echo -e "${YELLOW}无法删除 ${CONFIG_DIR}。${RESET}"
-            }
-            rm -f "${LOG_FILE}" || {
-                echo -e "${YELLOW}无法删除 ${LOG_FILE}。${RESET}"
-            }
-
-            # 重新加载 systemd
-            systemctl daemon-reload || {
-                echo -e "${YELLOW}无法重新加载 systemd 守护进程。${RESET}"
-            }
-
-            # 删除 sing-box 可执行文件，如果存在
+            # 删除配置文件
+            rm -rf "${CONFIG_DIR}"
+            
+            # 删除遗留的可执行文件
             if [ -f "/usr/local/bin/sing-box" ]; then
-                rm /usr/local/bin/sing-box || {
-                    echo -e "${YELLOW}无法删除 /usr/local/bin/sing-box。${RESET}"
-                }
+                rm /usr/local/bin/sing-box
             fi
 
             echo -e "${GREEN}sing-box 卸载成功${RESET}"
@@ -289,7 +313,12 @@ uninstall_sing_box() {
 
 # 启动 sing-box
 start_sing_box() {
-    systemctl start "${SERVICE_NAME}"
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        rc-service "${SERVICE_NAME}" start
+    else
+        systemctl start "${SERVICE_NAME}"
+    fi
+    
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}${SERVICE_NAME} 服务成功启动${RESET}"
     else
@@ -299,7 +328,12 @@ start_sing_box() {
 
 # 停止 sing-box
 stop_sing_box() {
-    systemctl stop "${SERVICE_NAME}"
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        rc-service "${SERVICE_NAME}" stop
+    else
+        systemctl stop "${SERVICE_NAME}"
+    fi
+
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}${SERVICE_NAME} 服务成功停止${RESET}"
     else
@@ -309,7 +343,12 @@ stop_sing_box() {
 
 # 重启 sing-box
 restart_sing_box() {
-    systemctl restart "${SERVICE_NAME}"
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        rc-service "${SERVICE_NAME}" restart
+    else
+        systemctl restart "${SERVICE_NAME}"
+    fi
+
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}${SERVICE_NAME} 服务成功重启${RESET}"
     else
@@ -319,14 +358,21 @@ restart_sing_box() {
 
 # 查看 sing-box 状态
 status_sing_box() {
-    systemctl status "${SERVICE_NAME}"
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        rc-service "${SERVICE_NAME}" status
+    else
+        systemctl status "${SERVICE_NAME}"
+    fi
 }
 
 # 查看 sing-box 日志
 log_sing_box() {
-    journalctl -u sing-box --no-pager -n 100
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        tail -n 100 /var/log/messages | grep sing-box
+    else
+        journalctl -u sing-box --no-pager -n 100
+    fi
 }
-
 
 # 查看 sing-box 配置
 check_sing_box() {
@@ -345,7 +391,12 @@ show_menu() {
     is_sing_box_running
     sing_box_running=$?
 
-    echo -e "${GREEN}=== sing-box 管理工具 ===${RESET}"
+    echo -e "${GREEN}=== sing-box 管理工具 (多系统兼容版) ===${RESET}"
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        echo -e "当前系统: ${YELLOW}Alpine Linux (OpenRC)${RESET}"
+    else
+        echo -e "当前系统: ${YELLOW}Standard Linux (Systemd)${RESET}"
+    fi
     echo -e "安装状态: $(if [ ${sing_box_installed} -eq 0 ]; then echo -e "${GREEN}已安装${RESET}"; else echo -e "${RED}未安装${RESET}"; fi)"
     echo -e "运行状态: $(if [ ${sing_box_running} -eq 0 ]; then echo -e "${GREEN}已运行${RESET}"; else echo -e "${RED}未运行${RESET}"; fi)"
     echo ""
@@ -363,13 +414,13 @@ show_menu() {
         echo "7. 查看 sing-box 配置"
     fi
     echo "0. 退出"
-    echo -e "${GREEN}=========================${RESET}"
+    echo -e "${GREEN}==========================================${RESET}"
     read -p "请输入选项编号 (0-7): " choice
     echo ""
 }
 
 # 捕获 Ctrl+C 信号
-trap 'echo -e "${RED}已取消操作${RESET}"; exit' INT
+trap 'echo -e "\n${RED}已取消操作${RESET}"; exit' INT
 
 # 主循环
 check_root
