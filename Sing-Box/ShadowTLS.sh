@@ -168,19 +168,19 @@ install_sing_box() {
   "dns": {
     "servers": [
       {
-        "tag": "Cloudflare",
+        "tag": "cloudflare",
         "type": "https",
         "server": "1.1.1.1",
       },
       {
-        "tag": "Google",
+        "tag": "google",
         "type": "https",
         "server": "8.8.8.8",
       }
     ]
   },
   "route": {
-    "default_domain_resolver": "dns-cf"
+    "default_domain_resolver": "cloudflare"
   },
   "inbounds": [
     {
