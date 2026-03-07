@@ -170,12 +170,12 @@ install_sing_box() {
       {
         "tag": "cloudflare",
         "type": "https",
-        "server": "1.1.1.1",
+        "server": "1.1.1.1"
       },
       {
         "tag": "google",
         "type": "https",
-        "server": "8.8.8.8",
+        "server": "8.8.8.8"
       }
     ]
   },
@@ -370,11 +370,8 @@ status_sing_box() {
 
 # 查看 sing-box 日志
 log_sing_box() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
-        tail -n 100 /var/log/messages | grep sing-box
-    else
-        journalctl -u sing-box --no-pager -n 100
-    fi
+    echo -e "${CYAN}正在显示最近 100 条并实时监控 sing-box 日志，按 Ctrl+C 退出${RESET}"
+    journalctl -u sing-box -n 100 -f
 }
 
 # 查看 sing-box 配置
