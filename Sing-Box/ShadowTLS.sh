@@ -170,12 +170,10 @@ install_sing_box() {
       {
         "type": "https",
         "server": "1.1.1.1",
-        "strategy": "prefer_ipv4"
       },
       {
         "type": "https",
         "server": "8.8.8.8",
-        "strategy": "prefer_ipv4"
       }
     ]
   },
@@ -415,7 +413,7 @@ show_menu() {
     fi
     echo "0. 退出"
     echo -e "${GREEN}==========================================${RESET}"
-    read -p "请输入选项编号 (0-7): " choice
+    read -p "请输入选项编号: " choice
     echo ""
 }
 
