@@ -370,7 +370,7 @@ status_sing_box() {
 
 # 查看 sing-box 日志
 log_sing_box() {
-    echo -e "${CYAN}正在显示最近 100 条并实时监控 sing-box 日志，按 Ctrl+C 退出${RESET}"
+    echo -e "${CYAN}正在实时监控 sing-box 日志，按 Ctrl+C 退出${RESET}"
     journalctl -u sing-box -n 100 -f
 }
 
@@ -391,7 +391,7 @@ show_menu() {
     is_sing_box_running
     sing_box_running=$?
 
-    echo -e "${GREEN}=== sing-box 管理工具 (多系统兼容版) ===${RESET}"
+    echo -e "${GREEN}=== sing-box 管理工具 ===${RESET}"
     if [ "$IS_ALPINE" -eq 1 ]; then
         echo -e "当前系统: ${YELLOW}Alpine Linux (OpenRC)${RESET}"
     else
