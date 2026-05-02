@@ -158,13 +158,24 @@ install_sing_box() {
     host_ip=$(curl -s http://checkip.amazonaws.com)
     ip_country=$(curl -s http://ipinfo.io/${host_ip}/country)
 
+    # 准备日志配置
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        LOG_CONFIG='  "log": {
+    "level": "info",
+    "timestamp": true,
+    "output": "/var/log/sing-box.log"
+  },'
+    else
+        LOG_CONFIG='  "log": {
+    "level": "info",
+    "timestamp": true
+  },'
+    fi
+
     # 生成配置文件
     cat > "${CONFIG_FILE}" << EOF
 {
-  "log": {
-    "level": "info",
-    "timestamp": true
-  },
+${LOG_CONFIG}
   "dns": {
     "servers": [
       {
@@ -220,6 +231,22 @@ install_sing_box() {
   ]
 }
 EOF
+
+    # 为 Alpine 安装和配置 logrotate
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        echo -e "${CYAN}检测到 Alpine 环境，正在配置 logrotate 自动清理日志...${RESET}"
+        apk add logrotate > /dev/null 2>&1
+        cat > /etc/logrotate.d/sing-box << EOF
+/var/log/sing-box.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+    fi
 
     # 启用并启动 sing-box 服务
     if [ "$IS_ALPINE" -eq 1 ]; then
@@ -298,8 +325,10 @@ uninstall_sing_box() {
                 systemctl daemon-reload
             fi
 
-            # 删除配置文件
+            # 删除配置文件及附属日志
             rm -rf "${CONFIG_DIR}"
+            rm -f /var/log/sing-box.log*
+            rm -f /etc/logrotate.d/sing-box
             
             # 删除遗留的可执行文件
             if [ -f "/usr/local/bin/sing-box" ]; then
