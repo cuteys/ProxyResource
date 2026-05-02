@@ -433,6 +433,116 @@ check_sing_box() {
     fi
 }
 
+# 更改 ShadowTLS / Shadowsocks 监听端口
+change_port() {
+    if [ ! -f "${CONFIG_FILE}" ]; then
+        echo -e "${RED}配置文件不存在: ${CONFIG_FILE}${RESET}"
+        return
+    fi
+
+    check_ss_command
+
+    current_ports=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); ports[++i]=$2 } END { if (i >= 2) print ports[1], ports[2] }' "${CONFIG_FILE}")
+    set -- ${current_ports}
+    current_ssport=$1
+    current_sport=$2
+
+    if [ -z "${current_ssport}" ] || [ -z "${current_sport}" ]; then
+        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}"
+        return
+    fi
+
+    echo -e "${CYAN}当前 ShadowTLS 端口  : ${current_sport}${RESET}"
+    echo -e "${CYAN}当前 Shadowsocks 端口: ${current_ssport}${RESET}"
+    echo "1. 更改 ShadowTLS 端口"
+    echo "2. 更改 Shadowsocks 端口"
+    echo "3. 同时更改两个端口"
+    read -p "请输入选项编号: " port_choice
+
+    new_sport=${current_sport}
+    new_ssport=${current_ssport}
+
+    case "${port_choice}" in
+        1)
+            new_sport=$(get_valid_port "请输入新的 ShadowTLS 监听端口 (默认随机，回车确认): ")
+            ;;
+        2)
+            new_ssport=$(get_valid_port "请输入新的 Shadowsocks 监听端口 (默认随机，回车确认): ")
+            ;;
+        3)
+            new_sport=$(get_valid_port "请输入新的 ShadowTLS 监听端口 (默认随机，回车确认): ")
+            new_ssport=$(get_valid_port "请输入新的 Shadowsocks 监听端口 (默认随机，回车确认): ")
+            ;;
+        *)
+            echo -e "${RED}无效的选项，已取消修改${RESET}"
+            return
+            ;;
+    esac
+
+    if [ "${new_sport}" = "${new_ssport}" ]; then
+        echo -e "${RED}ShadowTLS 和 Shadowsocks 端口不能相同，已取消修改${RESET}"
+        return
+    fi
+
+    if [ "${new_sport}" = "${current_sport}" ] && [ "${new_ssport}" = "${current_ssport}" ]; then
+        echo -e "${YELLOW}端口未变化，已取消修改${RESET}"
+        return
+    fi
+
+    tmp_file="${CONFIG_FILE}.tmp"
+    if ! awk -v new_ssport="${new_ssport}" -v new_sport="${new_sport}" '
+        /"listen_port"/ {
+            count++
+            if (count == 1) {
+                sub(/"listen_port"[[:space:]]*:[[:space:]]*[0-9]+/, "\"listen_port\": " new_ssport)
+            } else if (count == 2) {
+                sub(/"listen_port"[[:space:]]*:[[:space:]]*[0-9]+/, "\"listen_port\": " new_sport)
+            }
+        }
+        { print }
+    ' "${CONFIG_FILE}" > "${tmp_file}"; then
+        echo -e "${RED}更新服务端配置失败${RESET}"
+        rm -f "${tmp_file}"
+        return
+    fi
+    mv "${tmp_file}" "${CONFIG_FILE}"
+
+    if [ -f "${CLIENT_CONFIG_FILE}" ]; then
+        tmp_client_file="${CLIENT_CONFIG_FILE}.tmp"
+        if ! awk \
+            -v old_sport="${current_sport}" \
+            -v new_sport="${new_sport}" \
+            -v old_ssport="${current_ssport}" \
+            -v new_ssport="${new_ssport}" '
+            {
+                sub("ShadowTLS 端口[[:space:]]*:[[:space:]]*" old_sport, "ShadowTLS 端口  : " new_sport)
+                sub("Shadowsocks 端口:[[:space:]]*" old_ssport, "Shadowsocks 端口: " new_ssport)
+                sub("port: " old_sport "$", "port: " new_sport)
+                gsub(":" old_ssport "#", ":" new_ssport "#")
+                gsub("," old_sport ",2022-blake3-aes-128-gcm", "," new_sport ",2022-blake3-aes-128-gcm")
+                gsub("udp-port=" old_ssport, "udp-port=" new_ssport)
+                print
+            }
+        ' "${CLIENT_CONFIG_FILE}" > "${tmp_client_file}"; then
+            echo -e "${RED}更新客户端配置失败${RESET}"
+            rm -f "${tmp_client_file}"
+            return
+        fi
+        mv "${tmp_client_file}" "${CLIENT_CONFIG_FILE}"
+    else
+        echo -e "${YELLOW}客户端配置文件不存在，已仅更新服务端配置${RESET}"
+    fi
+
+    restart_sing_box
+    if is_sing_box_running; then
+        echo -e "${GREEN}ShadowTLS 端口已从 ${current_sport} 修改为 ${new_sport}${RESET}"
+        echo -e "${GREEN}Shadowsocks 端口已从 ${current_ssport} 修改为 ${new_ssport}${RESET}"
+        check_sing_box
+    else
+        echo -e "${RED}端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
+    fi
+}
+
 # 显示菜单
 show_menu() {
     clear
@@ -462,6 +572,7 @@ show_menu() {
         echo "5. 查看 sing-box 状态"
         echo "6. 查看 sing-box 日志"
         echo "7. 查看 ShadowTLS 节点链接配置"
+        echo "8. 更改 ShadowTLS / Shadowsocks 监听端口"
     fi
     echo "0. 退出"
     echo -e "${GREEN}===============================================${RESET}"
@@ -531,12 +642,19 @@ while true; do
                 echo -e "${RED}sing-box 尚未安装！${RESET}"
             fi
             ;;
+        8)
+            if [ ${sing_box_installed} -eq 0 ]; then
+                change_port
+            else
+                echo -e "${RED}sing-box 尚未安装！${RESET}"
+            fi
+            ;;
         0)
             echo -e "${GREEN}已退出 sing-box 管理工具${RESET}"
             exit 0
             ;;
         *)
-            echo -e "${RED}无效的选项，请输入有效的编号 (0-7)${RESET}"
+            echo -e "${RED}无效的选项，请输入有效的编号 (0-8)${RESET}"
             ;;
     esac
     read -p "按 Enter 键继续..."

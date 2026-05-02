@@ -419,6 +419,71 @@ check_sing_box() {
     fi
 }
 
+# 更改 VLESS 监听端口
+change_port() {
+    if [ ! -f "${CONFIG_FILE}" ]; then
+        echo -e "${RED}配置文件不存在: ${CONFIG_FILE}${RESET}"
+        return
+    fi
+
+    check_ss_command
+
+    current_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${CONFIG_FILE}")
+    if [ -z "${current_port}" ]; then
+        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}"
+        return
+    fi
+
+    echo -e "${CYAN}当前 VLESS 监听端口: ${current_port}${RESET}"
+    new_port=$(get_valid_port "请输入新的 VLESS 监听端口 (默认随机，回车确认): ")
+
+    if [ "${new_port}" = "${current_port}" ]; then
+        echo -e "${YELLOW}端口未变化，已取消修改${RESET}"
+        return
+    fi
+
+    tmp_file="${CONFIG_FILE}.tmp"
+    if ! awk -v new_port="${new_port}" '
+        /"listen_port"/ && changed == 0 {
+            sub(/"listen_port"[[:space:]]*:[[:space:]]*[0-9]+/, "\"listen_port\": " new_port)
+            changed = 1
+        }
+        { print }
+    ' "${CONFIG_FILE}" > "${tmp_file}"; then
+        echo -e "${RED}更新服务端配置失败${RESET}"
+        rm -f "${tmp_file}"
+        return
+    fi
+    mv "${tmp_file}" "${CONFIG_FILE}"
+
+    if [ -f "${CLIENT_CONFIG_FILE}" ]; then
+        tmp_client_file="${CLIENT_CONFIG_FILE}.tmp"
+        if ! awk -v old_port="${current_port}" -v new_port="${new_port}" '
+            {
+                sub("监听端口[[:space:]]*:[[:space:]]*" old_port, "监听端口  : " new_port)
+                gsub(":" old_port, ":" new_port)
+                gsub("," old_port ",", "," new_port ",")
+                print
+            }
+        ' "${CLIENT_CONFIG_FILE}" > "${tmp_client_file}"; then
+            echo -e "${RED}更新客户端配置失败${RESET}"
+            rm -f "${tmp_client_file}"
+            return
+        fi
+        mv "${tmp_client_file}" "${CLIENT_CONFIG_FILE}"
+    else
+        echo -e "${YELLOW}客户端配置文件不存在，已仅更新服务端配置${RESET}"
+    fi
+
+    restart_sing_box
+    if is_sing_box_running; then
+        echo -e "${GREEN}VLESS 监听端口已从 ${current_port} 修改为 ${new_port}${RESET}"
+        check_sing_box
+    else
+        echo -e "${RED}端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
+    fi
+}
+
 # 显示菜单
 show_menu() {
     clear
@@ -448,6 +513,7 @@ show_menu() {
         echo "5. 查看 sing-box 状态"
         echo "6. 查看 sing-box 日志"
         echo "7. 查看 VLESS 节点链接配置"
+        echo "8. 更改 VLESS 监听端口"
     fi
     echo "0. 退出"
     echo -e "${GREEN}===============================================${RESET}"
@@ -517,12 +583,19 @@ while true; do
                 echo -e "${RED}sing-box 尚未安装！${RESET}"
             fi
             ;;
+        8)
+            if [ ${sing_box_installed} -eq 0 ]; then
+                change_port
+            else
+                echo -e "${RED}sing-box 尚未安装！${RESET}"
+            fi
+            ;;
         0)
             echo -e "${GREEN}已退出 sing-box 管理工具${RESET}"
             exit 0
             ;;
         *)
-            echo -e "${RED}无效的选项，请输入有效的编号 (0-7)${RESET}"
+            echo -e "${RED}无效的选项，请输入有效的编号 (0-8)${RESET}"
             ;;
     esac
     read -p "按 Enter 键继续..."
