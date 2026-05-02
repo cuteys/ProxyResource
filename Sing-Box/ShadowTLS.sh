@@ -98,11 +98,7 @@ get_valid_port() {
     local port
     while true; do
         read -p "$1" port
-        port=${port:-$(generate_unused_port)}
-
-        if [ -z "$port" ]; then
-            port=$((RANDOM % 65535 + 1)) 
-        fi
+        port=${port:-$((RANDOM % 50000 + 10000))}
 
         if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
             if is_port_in_use "$port"; then
@@ -147,16 +143,16 @@ install_sing_box() {
     fi
 
     # 获取端口参数
-    sport=$(get_valid_port "请输入 ShadowTLS 端口（sport，1-65535）：")
-    ssport=$(get_valid_port "请输入 Shadowsocks 端口（ssport，1-65535）：")
+    sport=$(get_valid_port "请输入 ShadowTLS 监听端口 (默认随机，回车确认): ")
+    ssport=$(get_valid_port "请输入 Shadowsocks 监听端口 (默认随机，回车确认): ")
 
     # 生成密码
     ss_password=$(sing-box generate rand 16 --base64)
     password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
 
     # 获取本机 IP 地址和所在国家
-    host_ip=$(curl -s http://checkip.amazonaws.com)
-    ip_country=$(curl -s http://ipinfo.io/${host_ip}/country)
+    host_ip=$(curl -s --max-time 5 http://checkip.amazonaws.com)
+    ip_country=$(curl -s --max-time 5 http://ipinfo.io/${host_ip}/country)
 
     # 准备日志配置
     if [ "$IS_ALPINE" -eq 1 ]; then
@@ -278,6 +274,19 @@ EOF
 
     # 输出客户端配置到文件
     {
+        echo -e "${PURPLE}=============== 明文参数 ===============${RESET}"
+        echo "节点类型        : ShadowTLS + Shadowsocks"
+        echo "服务器IP        : ${host_ip}"
+        echo "ShadowTLS 端口  : ${sport}"
+        echo "Shadowsocks 端口: ${ssport}"
+        echo "加密方法        : 2022-blake3-aes-128-gcm"
+        echo "Shadowsocks 密码: ${ss_password}"
+        echo "ShadowTLS 密码  : ${password}"
+        echo "伪装域名        : www.bing.com"
+        echo "ShadowTLS 版本  : 3"
+        echo "指纹(fp)        : chrome"
+
+        echo -e "\n${CYAN}=============== Clash Meta ===============${RESET}"
         cat << EOF
   - name: ${ip_country}
     type: ss
@@ -297,13 +306,16 @@ EOF
       enabled: true
 EOF
 
-        echo
-        echo "ss://2022-blake3-aes-128-gcm:${ss_password}==@${host_ip}:${ssport}#${ip_country}"
-        echo
-        echo "${ip_country} = Shadowsocks,${host_ip},${sport},2022-blake3-aes-128-gcm,\"${ss_password}\",shadow-tls-password=${password},shadow-tls-sni=www.bing.com,shadow-tls-version=3,udp-port=${ssport},fast-open=false,udp=true"
+        echo -e "\n${CYAN}=============== 通用分享链接 ===============${RESET}"
+        echo -e "${YELLOW}ss://2022-blake3-aes-128-gcm:${ss_password}==@${host_ip}:${ssport}#${ip_country}${RESET}"
+
+        echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
+        echo -e "${YELLOW}${ip_country} = Shadowsocks,${host_ip},${sport},2022-blake3-aes-128-gcm,\"${ss_password}\",shadow-tls-password=${password},shadow-tls-sni=www.bing.com,shadow-tls-version=3,udp-port=${ssport},fast-open=false,udp=true${RESET}"
+        echo -e "${GREEN}================================================================${RESET}"
     } > "${CLIENT_CONFIG_FILE}"
 
-    echo -e "${GREEN}sing-box 安装成功${RESET}"
+    echo -e "${GREEN}sing-box 安装成功！${RESET}"
+    echo ""
     cat "${CLIENT_CONFIG_FILE}"
 }
 
@@ -429,7 +441,7 @@ show_menu() {
     is_sing_box_running
     sing_box_running=$?
 
-    echo -e "${GREEN}=== sing-box 管理工具 ===${RESET}"
+    echo -e "${GREEN}=== sing-box ShadowTLS 管理工具 ===${RESET}"
     if [ "$IS_ALPINE" -eq 1 ]; then
         echo -e "当前系统: ${YELLOW}Alpine Linux (OpenRC)${RESET}"
     else
@@ -438,7 +450,7 @@ show_menu() {
     echo -e "安装状态: $(if [ ${sing_box_installed} -eq 0 ]; then echo -e "${GREEN}已安装${RESET}"; else echo -e "${RED}未安装${RESET}"; fi)"
     echo -e "运行状态: $(if [ ${sing_box_running} -eq 0 ]; then echo -e "${GREEN}已运行${RESET}"; else echo -e "${RED}未运行${RESET}"; fi)"
     echo ""
-    echo "1. 安装 sing-box 服务"
+    echo "1. 安装 sing-box (ShadowTLS)"
     echo "2. 卸载 sing-box 服务"
     if [ ${sing_box_installed} -eq 0 ]; then
         if [ ${sing_box_running} -eq 0 ]; then
@@ -449,10 +461,10 @@ show_menu() {
         echo "4. 重启 sing-box 服务"
         echo "5. 查看 sing-box 状态"
         echo "6. 查看 sing-box 日志"
-        echo "7. 查看 sing-box 配置"
+        echo "7. 查看 ShadowTLS 节点链接配置"
     fi
     echo "0. 退出"
-    echo -e "${GREEN}==========================================${RESET}"
+    echo -e "${GREEN}===============================================${RESET}"
     read -p "请输入选项编号: " choice
     echo ""
 }

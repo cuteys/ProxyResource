@@ -193,6 +193,9 @@ ${LOG_CONFIG}
       }
     ]
   },
+  "route": {
+    "default_domain_resolver": "cloudflare"
+  },
   "inbounds": [
     {
       "type": "vless",
