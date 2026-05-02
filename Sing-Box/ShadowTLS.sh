@@ -371,7 +371,16 @@ status_sing_box() {
 # 查看 sing-box 日志
 log_sing_box() {
     echo -e "${CYAN}正在实时监控 sing-box 日志，按 Ctrl+C 退出${RESET}"
-    journalctl -u sing-box -n 100 -f
+    if [ "$IS_ALPINE" -eq 1 ]; then
+        if [ -f /var/log/sing-box.log ]; then
+            tail -f /var/log/sing-box.log
+        else
+            echo -e "${YELLOW}未找到专属日志文件，尝试过滤系统日志...${RESET}"
+            tail -f /var/log/messages | grep sing-box
+        fi
+    else
+        journalctl -u sing-box -n 100 -f
+    fi
 }
 
 # 查看 sing-box 配置
