@@ -148,9 +148,8 @@ install_sing_box() {
     read -p "请输入伪装域名 SNI (默认: www.yahoo.com): " sni
     sni=${sni:-www.yahoo.com}
 
-    echo -e "${CYAN}正在生成 UUID 和 Reality 密钥对...${RESET}"
+    echo -e "${CYAN}正在生成 UUID...${RESET}"
     uuid=$(sing-box generate uuid)
-    short_id=$(sing-box generate rand 8 --hex)
     
     # 生成密钥对并提取公私钥
     keys=$(sing-box generate reality-keypair)
@@ -277,7 +276,7 @@ EOF
     fi
 
     # 生成 vless 链接
-    vless_link="vless://${uuid}@${host_ip}:${listen_port}?security=reality&sni=${sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp&flow=xtls-rprx-vision#${ip_country}-VLESS-Reality"
+    vless_link="vless://${uuid}@${host_ip}:${listen_port}?security=reality&sni=${sni}&fp=chrome&pbk=${public_key}&type=tcp&flow=xtls-rprx-vision#${ip_country}-VLESS-Reality"
 
     # 输出客户端配置到文件
     {
@@ -291,14 +290,13 @@ EOF
         echo "伪装域名  : ${sni}"
         echo "安全配置  : reality"
         echo "公钥(pbk) : ${public_key}"
-        echo "ShortID   : ${short_id}"
         echo "指纹(fp)  : chrome"
         
         echo -e "\n${CYAN}=============== 通用分享链接 ===============${RESET}"
-        echo -e "${YELLOW}vless://${uuid}@${host_ip}:${listen_port}?security=reality&sni=${sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp&flow=xtls-rprx-vision#${ip_country}-VLESS-Reality${RESET}"
+        echo -e "${YELLOW}vless://${uuid}@${host_ip}:${listen_port}?security=reality&sni=${sni}&fp=chrome&pbk=${public_key}&type=tcp&flow=xtls-rprx-vision#${ip_country}-VLESS-Reality${RESET}"
         
         echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
-        echo -e "${YELLOW}${ip_country}-VLESS = VLESS,${host_ip},${listen_port},\"${uuid}\",transport=tcp,flow=xtls-rprx-vision,public-key=\"${public_key}\",reality-short-id=\"${short_id}\",udp=true,block-quic=false,over-tls=true,sni=${sni}${RESET}"
+        echo -e "${YELLOW}${ip_country}-VLESS = VLESS,${host_ip},${listen_port},\"${uuid}\",transport=tcp,flow=xtls-rprx-vision,public-key=\"${public_key}\",udp=true,block-quic=false,over-tls=true,sni=${sni}${RESET}"
         echo -e "${GREEN}================================================================${RESET}"
     } > "${CLIENT_CONFIG_FILE}"
 
