@@ -113,6 +113,29 @@ get_valid_port() {
     done
 }
 
+url_encode() {
+    local string="$1"
+    local length=${#string}
+    local encoded=""
+    local pos char
+    local hex
+
+    for ((pos = 0; pos < length; pos++)); do
+        char=${string:${pos}:1}
+        case "${char}" in
+            [a-zA-Z0-9.~_-])
+                encoded+="${char}"
+                ;;
+            *)
+                printf -v hex '%%%02X' "'${char}"
+                encoded+="${hex}"
+                ;;
+        esac
+    done
+
+    echo "${encoded}"
+}
+
 # 安装 sing-box
 install_sing_box() {
     echo -e "${CYAN}正在安装 sing-box${RESET}"
@@ -273,6 +296,9 @@ EOF
     fi
 
     # 输出客户端配置到文件
+    encoded_ss_password=$(url_encode "${ss_password}")
+    encoded_plugin=$(url_encode "shadow-tls;host=www.bing.com;passwd=${password};v3")
+
     {
         echo -e "${PURPLE}=============== 明文参数 ===============${RESET}"
         echo "节点类型        : ShadowTLS + Shadowsocks"
@@ -307,7 +333,7 @@ EOF
 EOF
 
         echo -e "\n${CYAN}=============== 通用分享链接 ===============${RESET}"
-        echo -e "${YELLOW}ss://2022-blake3-aes-128-gcm:${ss_password}==@${host_ip}:${ssport}#${ip_country}${RESET}"
+        echo -e "${YELLOW}ss://2022-blake3-aes-128-gcm:${encoded_ss_password}@${host_ip}:${sport}/?plugin=${encoded_plugin}#${ip_country}-ShadowTLS${RESET}"
 
         echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
         echo -e "${YELLOW}${ip_country} = Shadowsocks,${host_ip},${sport},2022-blake3-aes-128-gcm,\"${ss_password}\",shadow-tls-password=${password},shadow-tls-sni=www.bing.com,shadow-tls-version=3,udp-port=${ssport},fast-open=false,udp=true${RESET}"
@@ -518,6 +544,7 @@ change_port() {
                 sub("ShadowTLS 端口[[:space:]]*:[[:space:]]*" old_sport, "ShadowTLS 端口  : " new_sport)
                 sub("Shadowsocks 端口:[[:space:]]*" old_ssport, "Shadowsocks 端口: " new_ssport)
                 sub("port: " old_sport "$", "port: " new_sport)
+                gsub(":" old_sport "/[?]plugin=", ":" new_sport "/?plugin=")
                 gsub(":" old_ssport "#", ":" new_ssport "#")
                 gsub("," old_sport ",2022-blake3-aes-128-gcm", "," new_sport ",2022-blake3-aes-128-gcm")
                 gsub("udp-port=" old_ssport, "udp-port=" new_ssport)
