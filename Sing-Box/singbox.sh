@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# 定义颜色代码
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -10,7 +9,6 @@ CYAN='\033[0;36m'
 GRAY='\033[0;90m'
 RESET='\033[0m'
 
-# 定义常量
 CONFIG_DIR="/etc/sing-box"
 CONFIG_FILE="${CONFIG_DIR}/config.json"
 SERVICE_NAME="sing-box"
@@ -36,13 +34,11 @@ IP_INFO_LOADED=0
 IPV4_GEOIP_JSON=""
 IPV6_GEOIP_JSON=""
 
-# 检测是否为 Alpine Linux
 IS_ALPINE=0
 if [ -f /etc/alpine-release ]; then
     IS_ALPINE=1
 fi
 
-# 检查 root 权限
 check_root() {
     if [ "$(id -u)" != "0" ]; then
         echo -e "${RED}请使用 root 权限执行此脚本！${RESET}"
@@ -50,7 +46,6 @@ check_root() {
     fi
 }
 
-# 检查 sing-box 是否已安装
 is_sing_box_installed() {
     if command -v sing-box &> /dev/null; then
         return 0
@@ -59,7 +54,6 @@ is_sing_box_installed() {
     fi
 }
 
-# 检查 sing-box 运行状态
 is_sing_box_running() {
     if [ "$IS_ALPINE" -eq 1 ]; then
         rc-service "${SERVICE_NAME}" status &> /dev/null
@@ -69,12 +63,10 @@ is_sing_box_running() {
     return $?
 }
 
-# 检查 ss 命令是否可用
 check_ss_command() {
     if ! command -v ss &> /dev/null; then
         echo -e "${YELLOW}ss 命令未找到，正在尝试自动安装 iproute2 ${RESET}"
 
-        # 检测包管理器并安装
         if [ "$IS_ALPINE" -eq 1 ]; then
             apk update && apk add iproute2
         elif command -v apt-get &> /dev/null; then
@@ -92,7 +84,6 @@ check_ss_command() {
             exit 1
         fi
 
-        # 再次检查是否安装成功
         if command -v ss &> /dev/null; then
             echo -e "${GREEN}iproute2 安装成功，ss 命令已可用${RESET}"
         else
@@ -104,7 +95,6 @@ check_ss_command() {
     fi
 }
 
-# 检查端口是否被占用
 is_port_in_use() {
     local port=$1
     if ss -tuln | grep -q ":$port "; then
@@ -114,7 +104,6 @@ is_port_in_use() {
     fi
 }
 
-# 获取有效端口号
 get_valid_port() {
     local port
     while true; do
@@ -459,7 +448,6 @@ render_config() {
     local first=1
     ensure_state_dirs
 
-    # 准备日志配置
     if [ "$IS_ALPINE" -eq 1 ]; then
         LOG_CONFIG='  "log": {
     "level": "info",
@@ -564,7 +552,6 @@ EOF
     fi
 }
 
-# 安装 sing-box
 install_sing_box_binary() {
     check_ss_command
 
@@ -575,7 +562,6 @@ install_sing_box_binary() {
 
     echo -e "${CYAN}正在安装 sing-box${RESET}"
 
-    # 根据系统安装 sing-box
     if [ "$IS_ALPINE" -eq 1 ]; then
         echo -e "${YELLOW}检测到 Alpine Linux，使用 apk 安装...${RESET}"
         for repo in community testing; do
@@ -590,7 +576,6 @@ install_sing_box_binary() {
             exit 1
         fi
     else
-        # 标准 Linux 安装
         bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
             echo -e "${RED}sing-box 安装失败！请检查网络连接或安装脚本来源。${RESET}"
             exit 1
@@ -599,7 +584,6 @@ install_sing_box_binary() {
 }
 
 enable_sing_box_service() {
-    # 启用 sing-box 服务
     if [ "$IS_ALPINE" -eq 1 ]; then
         rc-update add "${SERVICE_NAME}" default || {
             echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}"
@@ -622,7 +606,6 @@ reload_sing_box_service() {
         start_sing_box
     fi
 
-    # 检查服务状态
     if ! is_sing_box_running; then
         echo -e "${RED}${SERVICE_NAME} 服务未成功启动！${RESET}"
         if [ "$IS_ALPINE" -eq 1 ]; then rc-service "${SERVICE_NAME}" status; else systemctl status "${SERVICE_NAME}"; fi
@@ -751,7 +734,6 @@ load_hy2_state() {
         return 1
     fi
 
-    # shellcheck disable=SC1090
     . "${HY2_STATE_FILE}"
 }
 
@@ -1355,7 +1337,6 @@ install_reality_protocol() {
         return
     fi
 
-    # 获取配置参数
     listen_port=$(get_valid_port "请输入 VLESS 监听端口 (默认随机，回车确认): ")
 
     read -p "请输入伪装域名 SNI (默认: www.yahoo.com): " sni
@@ -1365,7 +1346,6 @@ install_reality_protocol() {
     uuid=$(sing-box generate uuid)
     short_id=$(tr -dc 'a-f0-9' </dev/urandom | head -c 16)
 
-    # 生成密钥对并提取公私钥
     keys=$(sing-box generate reality-keypair)
     private_key=$(echo "$keys" | grep "PrivateKey" | awk '{print $2}')
     public_key=$(echo "$keys" | grep "PublicKey" | awk '{print $2}')
@@ -1498,14 +1478,12 @@ install_shadowtls_protocol() {
         return
     fi
 
-    # 获取端口参数
     sport=$(get_valid_port "请输入 ShadowTLS 监听端口 (默认随机，回车确认): ")
     ssport=$(get_valid_port "请输入 Shadowsocks 监听端口 (默认随机，回车确认): ")
 
     read -p "请输入 ShadowTLS 伪装域名 SNI (默认: www.bing.com): " shadowtls_sni
     shadowtls_sni=${shadowtls_sni:-www.bing.com}
 
-    # 生成密码
     ss_password=$(sing-box generate rand 16 --base64)
     password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
 
@@ -1657,8 +1635,8 @@ install_hy2_protocol() {
     fi
 
     hy2_port=$(get_valid_port "请输入 Hysteria2 UDP 监听端口 (默认随机，回车确认): ")
-    hy2_up_mbps=$(get_valid_mbps "请输入 HY2 上行带宽 Mbps (默认 100): " 100)
-    hy2_down_mbps=$(get_valid_mbps "请输入 HY2 下行带宽 Mbps (默认 100): " 100)
+    hy2_up_mbps=$(get_valid_mbps "请输入 HY2 上行带宽 Mbps (默认 1000): " 1000)
+    hy2_down_mbps=$(get_valid_mbps "请输入 HY2 下行带宽 Mbps (默认 1000): " 1000)
 
     read -p "请输入 HY2 TLS SNI (默认: www.bing.com): " hy2_sni
     hy2_sni=${hy2_sni:-www.bing.com}
@@ -1746,12 +1724,10 @@ uninstall_sing_box() {
                 systemctl daemon-reload
             fi
 
-            # 删除配置文件及附属日志
             rm -rf "${CONFIG_DIR}"
             rm -f /var/log/sing-box.log*
             rm -f /etc/logrotate.d/sing-box
 
-            # 删除遗留的可执行文件
             if [ -f "/usr/local/bin/sing-box" ]; then
                 rm /usr/local/bin/sing-box
             fi
@@ -1853,7 +1829,6 @@ remove_protocols() {
     fi
 }
 
-# 启动 sing-box
 start_sing_box() {
     if [ "$IS_ALPINE" -eq 1 ]; then
         rc-service "${SERVICE_NAME}" start
@@ -1868,7 +1843,6 @@ start_sing_box() {
     fi
 }
 
-# 停止 sing-box
 stop_sing_box() {
     if [ "$IS_ALPINE" -eq 1 ]; then
         rc-service "${SERVICE_NAME}" stop
@@ -1883,7 +1857,6 @@ stop_sing_box() {
     fi
 }
 
-# 重启 sing-box
 restart_sing_box() {
     if [ "$IS_ALPINE" -eq 1 ]; then
         rc-service "${SERVICE_NAME}" restart
@@ -1898,7 +1871,6 @@ restart_sing_box() {
     fi
 }
 
-# 查看 sing-box 状态
 status_sing_box() {
     if [ "$IS_ALPINE" -eq 1 ]; then
         rc-service "${SERVICE_NAME}" status
@@ -1907,7 +1879,6 @@ status_sing_box() {
     fi
 }
 
-# 查看 sing-box 日志
 log_sing_box() {
     echo -e "${CYAN}正在实时监控 sing-box 日志，按 Ctrl+C 退出${RESET}"
     if [ "$IS_ALPINE" -eq 1 ]; then
@@ -1922,7 +1893,6 @@ log_sing_box() {
     fi
 }
 
-# 查看 sing-box 配置
 strip_ansi() {
     sed "s/$(printf '\033')\\[[0-9;]*[A-Za-z]//g"
 }
@@ -2030,7 +2000,6 @@ client_config_menu() {
     esac
 }
 
-# 更改 VLESS Reality 监听端口与伪装域名
 change_reality_port() {
     local port_choice current_sni new_port new_sni tmp_file tmp_client_file
 
@@ -2152,7 +2121,6 @@ change_reality_port() {
     fi
 }
 
-# 更改 ShadowTLS / Shadowsocks 监听端口与伪装域名
 change_shadowtls_port() {
     import_existing_protocols
 
@@ -2300,7 +2268,6 @@ change_shadowtls_port() {
     fi
 }
 
-# 更改 Hysteria2 监听端口、TLS SNI 与端口跳跃
 change_hy2_port() {
     local port_choice enable_hop old_port old_sni old_hop_enabled old_hop_range old_hop_interval regen_hy2_cert
 
@@ -2534,8 +2501,8 @@ render_menu_screen() {
     fi
 
     draw_menu_header
-    echo -e "${YELLOW}${title}${RESET}"
-    echo ""
+    printf "%b\033[K\n" "${YELLOW}${title}${RESET}"
+    printf '\033[K\n'
 
     for ((i = 0; i < MENU_COUNT; i++)); do
         prefix=" "
@@ -2545,15 +2512,15 @@ render_menu_screen() {
             label_color="${GREEN}"
         fi
 
-        printf "%b %2s. %b%s%b\n" "${prefix}" "${MENU_NUMBERS[$i]}" "${label_color}" "${MENU_LABELS[$i]}" "${RESET}"
+        printf "%b %2s. %b%s%b\033[K\n" "${prefix}" "${MENU_NUMBERS[$i]}" "${label_color}" "${MENU_LABELS[$i]}" "${RESET}"
     done
 
-    echo ""
-    echo -e "${YELLOW}当前选项说明${RESET}"
-    echo -e "${GRAY}-----------------------------------------------------${RESET}"
-    echo -e " ${MENU_DESCS[$selected]}"
-    echo -e "${GRAY}-----------------------------------------------------${RESET}"
-    echo -e "${GRAY}↑/↓/j/k 移动   Enter/Space 确认   数字 快速选择   Esc/q 返回/退出${RESET}"
+    printf '\033[K\n'
+    printf "%b\033[K\n" "${YELLOW}当前选项说明${RESET}"
+    printf "%b\033[K\n" "${GRAY}-----------------------------------------------------${RESET}"
+    printf " %b\033[K\n" "${MENU_DESCS[$selected]}"
+    printf "%b\033[K\n" "${GRAY}-----------------------------------------------------${RESET}"
+    printf "%b\033[K\n" "${GRAY}↑/↓/j/k 移动   Enter/Space 确认   数字 快速选择   Esc/q 返回/退出${RESET}"
     printf '\033[J'
 }
 
@@ -2624,7 +2591,6 @@ interactive_select() {
     done
 }
 
-# 显示菜单
 show_menu() {
     load_startup_ip_info
     import_existing_protocols
@@ -2755,10 +2721,8 @@ firewall_menu() {
     done
 }
 
-# 捕获 Ctrl+C 信号
 trap 'printf "\033[?25h"; echo -e "\n${RED}已取消操作${RESET}"; exit' INT
 
-# 主循环
 check_root
 
 while true; do
