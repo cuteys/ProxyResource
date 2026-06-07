@@ -20,6 +20,9 @@ REALITY_FRAGMENT_FILE="${PROTOCOL_DIR}/reality.json"
 SHADOWTLS_FRAGMENT_FILE="${PROTOCOL_DIR}/shadowtls.json"
 HY2_FRAGMENT_FILE="${PROTOCOL_DIR}/hy2.json"
 HY2_STATE_FILE="${PROTOCOL_DIR}/hy2.env"
+UPSTREAM_OUTBOUND_FILE="${CONFIG_DIR}/upstream-outbound.env"
+UPSTREAM_OUTBOUND_TAG="upstream-out"
+LOG_STATE_FILE="${CONFIG_DIR}/log.env"
 REALITY_CLIENT_FILE="${CLIENT_DIR}/reality.txt"
 SHADOWTLS_CLIENT_FILE="${CLIENT_DIR}/shadowtls.txt"
 HY2_CLIENT_FILE="${CLIENT_DIR}/hy2.txt"
@@ -123,6 +126,37 @@ get_valid_port() {
     done
 }
 
+get_valid_target_port() {
+    local prompt=$1
+    local port
+
+    while true; do
+        read -p "${prompt}" port
+
+        if [[ "${port}" =~ ^[0-9]+$ ]] && [ "${port}" -ge 1 ] && [ "${port}" -le 65535 ]; then
+            echo "${port}"
+            return
+        fi
+
+        echo -e "${RED}请输入有效端口号（1-65535）${RESET}" >&2
+    done
+}
+
+get_required_value() {
+    local prompt=$1
+    local value
+
+    while true; do
+        read -r -p "${prompt}" value
+        if [ -n "${value}" ]; then
+            echo "${value}"
+            return
+        fi
+
+        echo -e "${RED}此项不能为空，请重新输入${RESET}" >&2
+    done
+}
+
 url_encode() {
     local string="$1"
     local length=${#string}
@@ -144,6 +178,14 @@ url_encode() {
     done
 
     echo "${encoded}"
+}
+
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+shell_single_quote_escape() {
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
 }
 
 json_string_value() {
@@ -250,6 +292,205 @@ format_host_for_uri() {
 
 ensure_state_dirs() {
     mkdir -p "${CONFIG_DIR}" "${PROTOCOL_DIR}" "${CLIENT_DIR}" "${CERT_DIR}"
+}
+
+is_valid_upstream_type() {
+    case "$1" in
+        socks|http) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+upstream_type_label() {
+    case "$1" in
+        socks) echo "SOCKS5" ;;
+        http) echo "HTTP" ;;
+        *) echo "未设置" ;;
+    esac
+}
+
+load_upstream_outbound() {
+    [ -f "${UPSTREAM_OUTBOUND_FILE}" ] || return 1
+
+    upstream_type=""
+    upstream_server=""
+    upstream_port=""
+    upstream_username=""
+    upstream_password=""
+    . "${UPSTREAM_OUTBOUND_FILE}"
+
+    is_valid_upstream_type "${upstream_type}" || return 1
+    [ -n "${upstream_server}" ] || return 1
+    [[ "${upstream_port}" =~ ^[0-9]+$ ]] || return 1
+    [ "${upstream_port}" -ge 1 ] && [ "${upstream_port}" -le 65535 ] || return 1
+}
+
+has_upstream_outbound() {
+    load_upstream_outbound
+}
+
+write_upstream_outbound_state() {
+    ensure_state_dirs
+
+    cat > "${UPSTREAM_OUTBOUND_FILE}" << EOF
+upstream_type='$(shell_single_quote_escape "${upstream_type}")'
+upstream_server='$(shell_single_quote_escape "${upstream_server}")'
+upstream_port='$(shell_single_quote_escape "${upstream_port}")'
+upstream_username='$(shell_single_quote_escape "${upstream_username}")'
+upstream_password='$(shell_single_quote_escape "${upstream_password}")'
+EOF
+}
+
+upstream_outbound_status_text() {
+    local auth_text
+
+    if [ -f "${UPSTREAM_OUTBOUND_FILE}" ]; then
+        if load_upstream_outbound; then
+            if [ -n "${upstream_username}" ]; then
+                auth_text="，认证: 已启用"
+            else
+                auth_text="，认证: 无"
+            fi
+            echo -e "${GREEN}$(upstream_type_label "${upstream_type}") -> ${upstream_server}:${upstream_port}${RESET}${GRAY}${auth_text}${RESET}"
+        else
+            echo -e "${RED}配置无效，当前渲染时会回退 direct${RESET}"
+        fi
+    else
+        echo -e "${YELLOW}未设置，默认直连 direct${RESET}"
+    fi
+}
+
+render_upstream_outbound_json() {
+    local escaped_server escaped_username escaped_password
+
+    load_upstream_outbound || return 1
+
+    escaped_server=$(json_escape "${upstream_server}")
+    escaped_username=$(json_escape "${upstream_username}")
+    escaped_password=$(json_escape "${upstream_password}")
+
+    echo "    {"
+    echo "      \"type\": \"${upstream_type}\","
+    echo "      \"tag\": \"${UPSTREAM_OUTBOUND_TAG}\","
+    echo "      \"server\": \"${escaped_server}\","
+    if [ "${upstream_type}" = "socks" ]; then
+        echo "      \"server_port\": ${upstream_port},"
+        if [ -n "${upstream_username}" ]; then
+            echo "      \"version\": \"5\","
+            echo "      \"username\": \"${escaped_username}\","
+            echo "      \"password\": \"${escaped_password}\""
+        else
+            echo "      \"version\": \"5\""
+        fi
+    else
+        if [ -n "${upstream_username}" ]; then
+            echo "      \"server_port\": ${upstream_port},"
+            echo "      \"username\": \"${escaped_username}\","
+            echo "      \"password\": \"${escaped_password}\""
+        else
+            echo "      \"server_port\": ${upstream_port}"
+        fi
+    fi
+    echo "    }"
+}
+
+load_log_state() {
+    [ -f "${LOG_STATE_FILE}" ] || return 1
+
+    log_enabled=""
+    . "${LOG_STATE_FILE}"
+
+    case "${log_enabled}" in
+        true|false) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_log_enabled() {
+    if load_log_state; then
+        [ "${log_enabled}" = "true" ]
+        return $?
+    fi
+
+    return 0
+}
+
+write_log_state() {
+    ensure_state_dirs
+
+    cat > "${LOG_STATE_FILE}" << EOF
+log_enabled='${log_enabled}'
+EOF
+}
+
+log_status_text() {
+    if is_log_enabled; then
+        echo -e "${GREEN}已开启${RESET}${GRAY}，可能记录连接源 IP${RESET}"
+    else
+        echo -e "${YELLOW}已关闭${RESET}${GRAY}，sing-box 不输出运行日志${RESET}"
+    fi
+}
+
+cleanup_sing_box_logs() {
+    local journal_mode=${1:-ask}
+    local journal_choice
+
+    rm -f /var/log/sing-box.log*
+    rm -f /etc/logrotate.d/sing-box
+
+    if [ "$IS_ALPINE" -ne 1 ] && command -v journalctl >/dev/null 2>&1; then
+        case "${journal_mode}" in
+            force)
+                journal_choice="y"
+                ;;
+            skip)
+                journal_choice="n"
+                ;;
+            *)
+                echo -e "${YELLOW}systemd journal 不支持只删除 sing-box 单个服务的历史日志。${RESET}"
+                read -r -p "是否清理已归档的 systemd journal? 这可能影响其它服务的历史日志 (y/N): " journal_choice
+                ;;
+        esac
+
+        case "${journal_choice}" in
+            y|Y)
+                journalctl --rotate >/dev/null 2>&1 || true
+                journalctl --vacuum-time=1s >/dev/null 2>&1 || true
+                echo -e "${GREEN}已清理已归档的 systemd journal${RESET}"
+                ;;
+            *)
+                echo -e "${YELLOW}已跳过 systemd journal 清理；如需彻底清除，请手动处理 journal 历史。${RESET}"
+                ;;
+        esac
+    fi
+
+    echo -e "${GREEN}已删除 sing-box 文件日志与 logrotate 配置${RESET}"
+}
+
+prompt_log_preference_if_unset() {
+    local choice
+
+    if [ -f "${LOG_STATE_FILE}" ]; then
+        return
+    fi
+
+    echo -e "${CYAN}日志设置${RESET}"
+    echo -e "${YELLOW}日志可能记录代理连接者 IP。为了隐私，默认关闭日志。${RESET}"
+    read -r -p "是否开启 sing-box 日志? (y/N): " choice
+
+    case "${choice}" in
+        y|Y)
+            log_enabled="true"
+            write_log_state
+            echo -e "${GREEN}已选择开启 sing-box 日志${RESET}"
+            ;;
+        *)
+            log_enabled="false"
+            write_log_state
+            cleanup_sing_box_logs ask
+            echo -e "${GREEN}已选择关闭 sing-box 日志${RESET}"
+            ;;
+    esac
 }
 
 config_has_reality() {
@@ -446,9 +687,18 @@ import_existing_protocols() {
 
 render_config() {
     local first=1
+    local upstream_enabled=0
     ensure_state_dirs
 
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if has_upstream_outbound; then
+        upstream_enabled=1
+    fi
+
+    if ! is_log_enabled; then
+        LOG_CONFIG='  "log": {
+    "disabled": true
+  },'
+    elif [ "$IS_ALPINE" -eq 1 ]; then
         LOG_CONFIG='  "log": {
     "level": "info",
     "timestamp": true,
@@ -479,9 +729,24 @@ ${LOG_CONFIG}
       }
     ]
   },
+EOF
+
+        if [ "${upstream_enabled}" -eq 1 ]; then
+            cat << EOF
+  "route": {
+    "default_domain_resolver": "cloudflare",
+    "final": "${UPSTREAM_OUTBOUND_TAG}"
+  },
+EOF
+        else
+            cat << EOF
   "route": {
     "default_domain_resolver": "cloudflare"
   },
+EOF
+        fi
+
+        cat << EOF
   "inbounds": [
 EOF
 
@@ -503,6 +768,14 @@ EOF
       "type": "direct",
       "tag": "direct"
     }
+EOF
+
+        if [ "${upstream_enabled}" -eq 1 ]; then
+            echo ","
+            render_upstream_outbound_json
+        fi
+
+        cat << EOF
   ]
 }
 EOF
@@ -537,6 +810,11 @@ render_client_config() {
 
 setup_logrotate_for_alpine() {
     if [ "$IS_ALPINE" -eq 1 ]; then
+        if ! is_log_enabled; then
+            rm -f /etc/logrotate.d/sing-box
+            return
+        fi
+
         echo -e "${CYAN}检测到 Alpine 环境，正在配置 logrotate 自动清理日志...${RESET}"
         apk add logrotate > /dev/null 2>&1
         cat > /etc/logrotate.d/sing-box << EOF
@@ -1676,6 +1954,7 @@ install_protocols() {
     PROTOCOL_CHANGED=0
 
     install_sing_box_binary
+    prompt_log_preference_if_unset
     setup_logrotate_for_alpine
     import_existing_protocols
 
@@ -1880,6 +2159,11 @@ status_sing_box() {
 }
 
 log_sing_box() {
+    if ! is_log_enabled; then
+        echo -e "${YELLOW}当前已关闭 sing-box 日志，无日志可查看${RESET}"
+        return
+    fi
+
     echo -e "${CYAN}正在实时监控 sing-box 日志，按 Ctrl+C 退出${RESET}"
     if [ "$IS_ALPINE" -eq 1 ]; then
         if [ -f /var/log/sing-box.log ]; then
@@ -1997,6 +2281,174 @@ client_config_menu() {
             SKIP_PAUSE=1
             return
             ;;
+    esac
+}
+
+configure_upstream_outbound() {
+    local selected_type=$1
+    local current_type="" current_server="" current_port="" current_username="" current_password=""
+    local label input_username input_password
+
+    if load_upstream_outbound; then
+        current_type="${upstream_type}"
+        current_server="${upstream_server}"
+        current_port="${upstream_port}"
+        current_username="${upstream_username}"
+        current_password="${upstream_password}"
+    fi
+
+    label=$(upstream_type_label "${selected_type}")
+    if [ "${current_type}" != "${selected_type}" ]; then
+        current_username=""
+        current_password=""
+    fi
+
+    echo -e "${CYAN}配置 ${label} 上游出站${RESET}"
+    echo -e "${GRAY}启用后，脚本生成的 route.final 会指向 ${UPSTREAM_OUTBOUND_TAG}，未匹配其它规则的 sing-box 入站流量都会走这里。${RESET}"
+    if [ "${current_type}" = "${selected_type}" ]; then
+        echo -e "${GRAY}当前 ${label} 上游: ${current_server}:${current_port}${RESET}"
+    fi
+    upstream_server=$(get_required_value "请输入 ${label} 上游地址: ")
+    upstream_port=$(get_valid_target_port "请输入 ${label} 上游端口: ")
+
+    if [ -n "${current_username}" ]; then
+        read -r -p "请输入认证用户名 (当前: ${current_username}；回车保留，输入 - 清空认证): " input_username
+        case "${input_username}" in
+            "")
+                upstream_username="${current_username}"
+                upstream_password="${current_password}"
+                ;;
+            -)
+                upstream_username=""
+                upstream_password=""
+                ;;
+            *)
+                upstream_username="${input_username}"
+                ;;
+        esac
+    else
+        read -r -p "请输入认证用户名 (无认证直接回车): " upstream_username
+        upstream_password=""
+    fi
+
+    if [ -n "${upstream_username}" ]; then
+        if [ "${upstream_username}" = "${current_username}" ] && [ -n "${current_password}" ]; then
+            read -r -s -p "请输入认证密码 (回车保留当前密码): " input_password
+            echo ""
+            upstream_password=${input_password:-${current_password}}
+        else
+            read -r -s -p "请输入认证密码: " upstream_password
+            echo ""
+        fi
+    fi
+
+    upstream_type="${selected_type}"
+    write_upstream_outbound_state
+    render_config
+    restart_sing_box
+
+    if is_sing_box_running; then
+        echo -e "${GREEN}上游出站已启用: $(upstream_type_label "${upstream_type}") -> ${upstream_server}:${upstream_port}${RESET}"
+    else
+        echo -e "${RED}配置已写入，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
+    fi
+}
+
+disable_upstream_outbound() {
+    if [ ! -f "${UPSTREAM_OUTBOUND_FILE}" ]; then
+        echo -e "${YELLOW}当前未设置上游出站，无需关闭${RESET}"
+        return
+    fi
+
+    rm -f "${UPSTREAM_OUTBOUND_FILE}"
+    render_config
+    restart_sing_box
+
+    if is_sing_box_running; then
+        echo -e "${GREEN}已关闭上游出站，默认出站恢复为 direct${RESET}"
+    else
+        echo -e "${YELLOW}已关闭上游出站并写入配置；服务当前未运行，请按需启动${RESET}"
+    fi
+}
+
+upstream_outbound_menu() {
+    menu_reset
+    menu_add "1" "设置 / 更新 SOCKS5 上游" "适合本机或内网 Socks5 代理；地址和端口均需手动填写。"
+    menu_add "2" "设置 / 更新 HTTP 上游" "适合本机或内网 HTTP CONNECT 代理；地址和端口均需手动填写。"
+    if [ -f "${UPSTREAM_OUTBOUND_FILE}" ]; then
+        menu_add "3" "关闭上游出站" "删除上游出站设置，恢复 sing-box 默认 direct。"
+    fi
+    menu_add "0" "返回主菜单" "不修改出站设置。"
+    interactive_select "请选择上游出站操作:"
+
+    case "${MENU_CHOICE}" in
+        1) configure_upstream_outbound "socks" ;;
+        2) configure_upstream_outbound "http" ;;
+        3) disable_upstream_outbound ;;
+        0)
+            SKIP_PAUSE=1
+            return
+            ;;
+        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" ;;
+    esac
+}
+
+apply_log_setting() {
+    local enabled=$1
+
+    log_enabled="${enabled}"
+    write_log_state
+    setup_logrotate_for_alpine
+    render_config
+
+    if is_sing_box_running; then
+        restart_sing_box
+    else
+        echo -e "${YELLOW}${SERVICE_NAME} 服务当前未运行，已仅写入配置${RESET}"
+    fi
+
+    if [ "${enabled}" = "false" ]; then
+        cleanup_sing_box_logs ask
+        echo -e "${GREEN}sing-box 日志已关闭${RESET}"
+    else
+        echo -e "${GREEN}sing-box 日志已开启${RESET}"
+    fi
+}
+
+logging_menu() {
+    local confirm
+
+    menu_reset
+    if is_log_enabled; then
+        menu_add "1" "关闭日志并删除历史日志" "写入 log.disabled=true，并清理 sing-box 历史日志。"
+    else
+        menu_add "1" "开启日志" "恢复 sing-box info 日志；可能记录代理连接者 IP。"
+    fi
+    menu_add "2" "清理历史日志" "删除 sing-box 文件日志；systemd journal 会另行询问。"
+    menu_add "0" "返回主菜单" "不修改日志设置。"
+    interactive_select "请选择日志操作:"
+
+    case "${MENU_CHOICE}" in
+        1)
+            if is_log_enabled; then
+                read -r -p "$(echo -e "${YELLOW}确认关闭日志并删除历史日志吗? (Y/n) ${RESET}")" confirm
+                confirm=${confirm:-Y}
+                case "${confirm}" in
+                    y|Y) apply_log_setting "false" ;;
+                    *) echo -e "${YELLOW}已取消关闭日志${RESET}" ;;
+                esac
+            else
+                apply_log_setting "true"
+            fi
+            ;;
+        2)
+            cleanup_sing_box_logs ask
+            ;;
+        0)
+            SKIP_PAUSE=1
+            return
+            ;;
+        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" ;;
     esac
 }
 
@@ -2404,7 +2856,7 @@ protocol_status_text() {
 }
 
 build_state_panel_cache() {
-    local os_text core_text service_text protocol_text firewall_text
+    local os_text core_text service_text protocol_text upstream_text log_text firewall_text
 
     if [ "$IS_ALPINE" -eq 1 ]; then
         os_text="${YELLOW}Alpine Linux / OpenRC${RESET}"
@@ -2425,12 +2877,16 @@ build_state_panel_cache() {
     fi
 
     protocol_text="Reality $(protocol_status_text has_reality_protocol) | HY2 $(protocol_status_text has_hy2_protocol) | ShadowTLS $(protocol_status_text has_shadowtls_protocol)"
+    upstream_text="$(upstream_outbound_status_text)"
+    log_text="$(log_status_text)"
     firewall_text="$(firewall_backend_label)"
 
     STATE_PANEL_TEXT=$(cat << EOF
 系统: ${os_text}
 核心: ${core_text}  服务: ${service_text}
 协议: ${protocol_text}
+出站: ${upstream_text}
+日志: ${log_text}
 防火墙: ${firewall_text}
 
 $(show_startup_ip_info)
@@ -2624,6 +3080,7 @@ show_menu() {
         fi
 
         menu_add_auto "查看节点链接配置" "默认进入简洁摘要；完整 Clash / Sing-box / Sub-Store 配置可在二级菜单打开。" "view_config"
+        menu_add_auto "配置上游出站" "可选设置 SOCKS5 / HTTP 上游；未设置时保持 direct，设置后作为 sing-box 默认出站。" "upstream_outbound"
         if [ ${sing_box_running} -eq 0 ]; then
             menu_add_auto "停止 sing-box 服务" "停止正在运行的 sing-box 服务。" "toggle_service"
         else
@@ -2632,6 +3089,7 @@ show_menu() {
         menu_add_auto "重启 sing-box 服务" "重新加载服务，适合手动调整配置后使用。" "restart"
         menu_add_auto "查看 sing-box 状态" "调用系统服务管理器查看 sing-box 当前运行状态。" "status"
         menu_add_auto "查看 sing-box 日志" "实时跟踪 sing-box 日志，按 Ctrl+C 退出日志查看。" "logs"
+        menu_add_auto "日志开关 / 清理" "开启或关闭 sing-box 日志；关闭时会清理历史日志，降低连接者 IP 暴露风险。" "logging"
         menu_add_auto "修改端口 / HY2 端口跳跃" "修改 Reality、HY2、ShadowTLS 端口，或重新配置 HY2 端口跳跃。" "change_ports"
         menu_add_auto "防火墙检测 / 自动放行" "检测防火墙后端，或手动放行当前协议端口；安装和改端口不会自动修改防火墙。" "firewall"
         menu_add_auto "删除指定协议" "选择并删除某个协议；如果没有剩余协议，会询问是否同时卸载。" "remove_protocol"
@@ -2748,6 +3206,13 @@ while true; do
                 echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
             fi
             ;;
+        upstream_outbound)
+            if [ ${sing_box_installed} -eq 0 ]; then
+                upstream_outbound_menu
+            else
+                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
+            fi
+            ;;
         toggle_service)
             if [ ${sing_box_installed} -eq 0 ]; then
                 if [ ${sing_box_running} -eq 0 ]; then
@@ -2776,6 +3241,13 @@ while true; do
         logs)
             if [ ${sing_box_installed} -eq 0 ]; then
                 log_sing_box
+            else
+                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
+            fi
+            ;;
+        logging)
+            if [ ${sing_box_installed} -eq 0 ]; then
+                logging_menu
             else
                 echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
             fi
