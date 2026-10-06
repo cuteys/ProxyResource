@@ -718,30 +718,30 @@ ${LOG_CONFIG}
   "dns": {
     "servers": [
       {
-        "tag": "cloudflare",
-        "type": "https",
-        "server": "1.1.1.1"
+        "tag": "local-dns",
+        "type": "local"
       },
       {
-        "tag": "google",
-        "type": "https",
+        "tag": "remote-dns",
+        "type": "udp",
         "server": "8.8.8.8"
       }
-    ]
+    ],
+    "strategy": "prefer_ipv4"
   },
 EOF
 
         if [ "${upstream_enabled}" -eq 1 ]; then
             cat << EOF
   "route": {
-    "default_domain_resolver": "cloudflare",
+    "default_domain_resolver": "local-dns",
     "final": "${UPSTREAM_OUTBOUND_TAG}"
   },
 EOF
         else
             cat << EOF
   "route": {
-    "default_domain_resolver": "cloudflare"
+    "default_domain_resolver": "local-dns"
   },
 EOF
         fi
@@ -1617,8 +1617,8 @@ install_reality_protocol() {
 
     listen_port=$(get_valid_port "请输入 VLESS 监听端口 (默认随机，回车确认): ")
 
-    read -p "请输入伪装域名 SNI (默认: www.yahoo.com): " sni
-    sni=${sni:-www.yahoo.com}
+    read -p "请输入伪装域名 SNI (默认: itunes.apple.com): " sni
+    sni=${sni:-itunes.apple.com}
 
     echo -e "${CYAN}正在生成 UUID...${RESET}"
     uuid=$(sing-box generate uuid)
@@ -2471,7 +2471,7 @@ change_reality_port() {
     fi
 
     current_sni=$(awk -F\" '/"server_name"[[:space:]]*:/ { print $4; exit }' "${REALITY_FRAGMENT_FILE}")
-    current_sni=${current_sni:-www.yahoo.com}
+    current_sni=${current_sni:-itunes.apple.com}
 
     menu_reset
     menu_add "1" "更改 Reality 监听端口" "当前 Reality 端口: ${current_port}。只修改入站监听端口。"
