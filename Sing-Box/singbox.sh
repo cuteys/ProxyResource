@@ -66,6 +66,35 @@ is_sing_box_running() {
     return $?
 }
 
+check_time_sync() {
+    if [ "${IS_ALPINE}" -eq 1 ]; then
+        if ! command -v chronyd &> /dev/null && ! command -v ntpd &> /dev/null; then
+            echo -e "${YELLOW}提示：未检测到时间同步服务，Reality 对时间要求严格，建议安装 chrony 并保持运行${RESET}"
+        fi
+        return
+    fi
+    if ! command -v timedatectl &> /dev/null; then
+        echo -e "${YELLOW}提示：未找到 timedatectl，请自行确认系统时间同步已开启${RESET}"
+        return
+    fi
+    if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" != "yes" ]; then
+        echo -e "${YELLOW}警告：系统时间未与网络同步，Reality 握手与防探测都依赖准确时间${RESET}"
+        read -p "是否立即开启自动校时? (y/N): " sync_answer
+        case "${sync_answer}" in
+            [yY]|[yY][eE][sS])
+                if timedatectl set-ntp true; then
+                    echo -e "${GREEN}自动校时已开启${RESET}"
+                else
+                    echo -e "${RED}开启失败，请手动执行: timedatectl set-ntp true${RESET}"
+                fi
+                ;;
+            *)
+                echo -e "${YELLOW}已跳过，可稍后手动执行: timedatectl set-ntp true${RESET}"
+                ;;
+        esac
+    fi
+}
+
 check_ss_command() {
     if ! command -v ss &> /dev/null; then
         echo -e "${YELLOW}ss 命令未找到，正在尝试自动安装 iproute2 ${RESET}"
@@ -1617,8 +1646,8 @@ install_reality_protocol() {
 
     listen_port=$(get_valid_port "请输入 VLESS 监听端口 (默认随机，回车确认): ")
 
-    read -p "请输入伪装域名 SNI (默认: itunes.apple.com): " sni
-    sni=${sni:-itunes.apple.com}
+    read -p "请输入伪装域名 SNI (默认: www.gutenberg.org): " sni
+    sni=${sni:-www.gutenberg.org}
 
     echo -e "${CYAN}正在生成 UUID...${RESET}"
     uuid=$(sing-box generate uuid)
@@ -1759,8 +1788,8 @@ install_shadowtls_protocol() {
     sport=$(get_valid_port "请输入 ShadowTLS 监听端口 (默认随机，回车确认): ")
     ssport=$(get_valid_port "请输入 Shadowsocks 监听端口 (默认随机，回车确认): ")
 
-    read -p "请输入 ShadowTLS 伪装域名 SNI (默认: itunes.apple.com): " shadowtls_sni
-    shadowtls_sni=${shadowtls_sni:-itunes.apple.com}
+    read -p "请输入 ShadowTLS 伪装域名 SNI (默认: www.gutenberg.org): " shadowtls_sni
+    shadowtls_sni=${shadowtls_sni:-www.gutenberg.org}
 
     ss_password=$(sing-box generate rand 16 --base64)
     password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
@@ -1916,8 +1945,8 @@ install_hy2_protocol() {
     hy2_up_mbps=$(get_valid_mbps "请输入 HY2 上行带宽 Mbps (默认 1000): " 1000)
     hy2_down_mbps=$(get_valid_mbps "请输入 HY2 下行带宽 Mbps (默认 1000): " 1000)
 
-    read -p "请输入 HY2 TLS SNI (默认: itunes.apple.com): " hy2_sni
-    hy2_sni=${hy2_sni:-itunes.apple.com}
+    read -p "请输入 HY2 TLS SNI (默认: www.gutenberg.org): " hy2_sni
+    hy2_sni=${hy2_sni:-www.gutenberg.org}
 
     read -p "是否启用 HY2 端口跳跃? (y/N): " enable_hop
     case "${enable_hop}" in
@@ -1977,6 +2006,7 @@ install_protocols() {
         render_client_config
         reload_sing_box_service
         echo -e "${GREEN}sing-box 协议配置更新成功！${RESET}"
+        echo -e "${YELLOW}安全提醒：请勿将节点配置发到聊天群，勿用在线检测网站测试节点${RESET}"
         echo ""
         show_client_summary
     else
@@ -2471,7 +2501,7 @@ change_reality_port() {
     fi
 
     current_sni=$(awk -F\" '/"server_name"[[:space:]]*:/ { print $4; exit }' "${REALITY_FRAGMENT_FILE}")
-    current_sni=${current_sni:-itunes.apple.com}
+    current_sni=${current_sni:-www.gutenberg.org}
 
     menu_reset
     menu_add "1" "更改 Reality 监听端口" "当前 Reality 端口: ${current_port}。只修改入站监听端口。"
@@ -2588,7 +2618,7 @@ change_shadowtls_port() {
     current_ssport=$1
     current_sport=$2
     current_sni=$(awk -F\" '/"server"[[:space:]]*:/ { print $4; exit }' "${SHADOWTLS_FRAGMENT_FILE}")
-    current_sni=${current_sni:-itunes.apple.com}
+    current_sni=${current_sni:-www.gutenberg.org}
 
     if [ -z "${current_ssport}" ] || [ -z "${current_sport}" ]; then
         echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}"
@@ -2734,7 +2764,7 @@ change_hy2_port() {
     check_ss_command
 
     old_port=${hy2_port}
-    old_sni=${hy2_sni:-itunes.apple.com}
+    old_sni=${hy2_sni:-www.gutenberg.org}
     hy2_sni=${old_sni}
     old_hop_enabled=${hy2_hop_enabled}
     old_hop_range=${hy2_hop_range}
@@ -3182,6 +3212,7 @@ firewall_menu() {
 trap 'printf "\033[?25h"; echo -e "\n${RED}已取消操作${RESET}"; exit' INT
 
 check_root
+check_time_sync
 
 while true; do
     SKIP_PAUSE=0
