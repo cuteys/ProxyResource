@@ -1474,7 +1474,6 @@ apply_current_firewall_rules() {
         shadow_sport=$2
         [ -n "${shadow_sport}" ] && add_firewall_rule_once "${backend}" "tcp" "${shadow_sport}" "ShadowTLS"
         if [ -n "${shadow_ssport}" ]; then
-            add_firewall_rule_once "${backend}" "tcp" "${shadow_ssport}" "Shadowsocks"
             add_firewall_rule_once "${backend}" "udp" "${shadow_ssport}" "Shadowsocks"
         fi
     fi
@@ -1528,7 +1527,6 @@ show_firewall_status() {
         shadow_ssport=$1
         shadow_sport=$2
         print_firewall_port_status "${backend}" "ShadowTLS" "tcp" "${shadow_sport}"
-        print_firewall_port_status "${backend}" "Shadowsocks" "tcp" "${shadow_ssport}"
         print_firewall_port_status "${backend}" "Shadowsocks" "udp" "${shadow_ssport}"
         printed_ports=1
     fi
