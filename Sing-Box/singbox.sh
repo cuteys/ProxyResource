@@ -20,12 +20,15 @@ REALITY_FRAGMENT_FILE="${PROTOCOL_DIR}/reality.json"
 SHADOWTLS_FRAGMENT_FILE="${PROTOCOL_DIR}/shadowtls.json"
 HY2_FRAGMENT_FILE="${PROTOCOL_DIR}/hy2.json"
 HY2_STATE_FILE="${PROTOCOL_DIR}/hy2.env"
+SNELL_FRAGMENT_FILE="${PROTOCOL_DIR}/snell.json"
+SNELL_STATE_FILE="${PROTOCOL_DIR}/snell.env"
 UPSTREAM_OUTBOUND_FILE="${CONFIG_DIR}/upstream-outbound.env"
 UPSTREAM_OUTBOUND_TAG="upstream-out"
 LOG_STATE_FILE="${CONFIG_DIR}/log.env"
 REALITY_CLIENT_FILE="${CLIENT_DIR}/reality.txt"
 SHADOWTLS_CLIENT_FILE="${CLIENT_DIR}/shadowtls.txt"
 HY2_CLIENT_FILE="${CLIENT_DIR}/hy2.txt"
+SNELL_CLIENT_FILE="${CLIENT_DIR}/snell.txt"
 HY2_CERT_FILE="${CERT_DIR}/hy2.crt"
 HY2_KEY_FILE="${CERT_DIR}/hy2.key"
 HY2_PORT_HOP_FILE="${CONFIG_DIR}/hy2-port-hop.sh"
@@ -534,6 +537,10 @@ config_has_hy2() {
     [ -f "${CONFIG_FILE}" ] && grep -q '"tag"[[:space:]]*:[[:space:]]*"hy2-in"' "${CONFIG_FILE}"
 }
 
+config_has_snell() {
+    [ -f "${CONFIG_FILE}" ] && grep -q '"tag"[[:space:]]*:[[:space:]]*"snell-in"' "${CONFIG_FILE}"
+}
+
 has_reality_protocol() {
     [ -f "${REALITY_FRAGMENT_FILE}" ] || config_has_reality
 }
@@ -546,8 +553,12 @@ has_hy2_protocol() {
     [ -f "${HY2_FRAGMENT_FILE}" ] || config_has_hy2
 }
 
+has_snell_protocol() {
+    [ -f "${SNELL_FRAGMENT_FILE}" ] || config_has_snell
+}
+
 has_all_protocols() {
-    has_reality_protocol && has_hy2_protocol && has_shadowtls_protocol
+    has_reality_protocol && has_hy2_protocol && has_shadowtls_protocol && has_snell_protocol
 }
 
 extract_inbounds_to_fragment() {
@@ -571,6 +582,9 @@ extract_inbounds_to_fragment() {
             }
             if (protocol == "hy2") {
                 return block ~ /"tag"[[:space:]]*:[[:space:]]*"hy2-in"/
+            }
+            if (protocol == "snell") {
+                return block ~ /"tag"[[:space:]]*:[[:space:]]*"snell-in"/
             }
             return block ~ /"tag"[[:space:]]*:[[:space:]]*"shadowsocks-in"/ || block ~ /"type"[[:space:]]*:[[:space:]]*"shadowtls"/
         }
@@ -677,6 +691,7 @@ import_existing_clients() {
         [ -f "${REALITY_CLIENT_FILE}" ] || import_marked_client_section "===== BEGIN VLESS Reality =====" "===== END VLESS Reality =====" "${REALITY_CLIENT_FILE}"
         [ -f "${HY2_CLIENT_FILE}" ] || import_marked_client_section "===== BEGIN Hysteria2 =====" "===== END Hysteria2 =====" "${HY2_CLIENT_FILE}"
         [ -f "${SHADOWTLS_CLIENT_FILE}" ] || import_marked_client_section "===== BEGIN ShadowTLS + Shadowsocks =====" "===== END ShadowTLS + Shadowsocks =====" "${SHADOWTLS_CLIENT_FILE}"
+        [ -f "${SNELL_CLIENT_FILE}" ] || import_marked_client_section "===== BEGIN Snell =====" "===== END Snell =====" "${SNELL_CLIENT_FILE}"
         return
     fi
 
@@ -709,6 +724,11 @@ import_existing_protocols() {
     if config_has_hy2 && [ ! -f "${HY2_FRAGMENT_FILE}" ]; then
         echo -e "${CYAN}检测到现有 Hysteria2 配置，正在导入以便合并管理...${RESET}"
         extract_inbounds_to_fragment "hy2" "${HY2_FRAGMENT_FILE}"
+    fi
+
+    if config_has_snell && [ ! -f "${SNELL_FRAGMENT_FILE}" ]; then
+        echo -e "${CYAN}检测到现有 Snell 配置，正在导入以便合并管理...${RESET}"
+        extract_inbounds_to_fragment "snell" "${SNELL_FRAGMENT_FILE}"
     fi
 
     import_existing_clients
@@ -779,7 +799,7 @@ EOF
   "inbounds": [
 EOF
 
-        for fragment_file in "${REALITY_FRAGMENT_FILE}" "${HY2_FRAGMENT_FILE}" "${SHADOWTLS_FRAGMENT_FILE}"; do
+        for fragment_file in "${REALITY_FRAGMENT_FILE}" "${HY2_FRAGMENT_FILE}" "${SHADOWTLS_FRAGMENT_FILE}" "${SNELL_FRAGMENT_FILE}"; do
             if [ -f "${fragment_file}" ]; then
                 if [ "${first}" -eq 0 ]; then
                     echo ","
@@ -833,6 +853,13 @@ render_client_config() {
             echo "===== BEGIN ShadowTLS + Shadowsocks ====="
             cat "${SHADOWTLS_CLIENT_FILE}"
             echo "===== END ShadowTLS + Shadowsocks ====="
+            echo ""
+        fi
+
+        if [ -f "${SNELL_CLIENT_FILE}" ]; then
+            echo "===== BEGIN Snell ====="
+            cat "${SNELL_CLIENT_FILE}"
+            echo "===== END Snell ====="
         fi
     } > "${CLIENT_CONFIG_FILE}"
 }
@@ -1436,7 +1463,7 @@ add_firewall_rule_once() {
 }
 
 apply_current_firewall_rules() {
-    local backend reality_port hy2_current_port shadow_ports shadow_ssport shadow_sport
+    local backend reality_port hy2_current_port shadow_ports shadow_ssport shadow_sport snell_port
 
     ensure_state_dirs
     backend=$(detect_firewall_backend)
@@ -1478,13 +1505,18 @@ apply_current_firewall_rules() {
         fi
     fi
 
+    if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
+        snell_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${SNELL_FRAGMENT_FILE}")
+        [ -n "${snell_port}" ] && add_firewall_rule_once "${backend}" "tcp" "${snell_port}" "Snell"
+    fi
+
     if [ ! -s "${FIREWALL_STATE_FILE}" ]; then
         rm -f "${FIREWALL_STATE_FILE}"
     fi
 }
 
 show_firewall_status() {
-    local backend reality_port shadow_ports shadow_ssport shadow_sport printed_ports
+    local backend reality_port shadow_ports shadow_ssport shadow_sport snell_port printed_ports
 
     import_existing_protocols
     backend=$(detect_firewall_backend)
@@ -1528,6 +1560,12 @@ show_firewall_status() {
         shadow_sport=$2
         print_firewall_port_status "${backend}" "ShadowTLS" "tcp" "${shadow_sport}"
         print_firewall_port_status "${backend}" "Shadowsocks" "udp" "${shadow_ssport}"
+        printed_ports=1
+    fi
+
+    if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
+        snell_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${SNELL_FRAGMENT_FILE}")
+        print_firewall_port_status "${backend}" "Snell" "tcp" "${snell_port}"
         printed_ports=1
     fi
 
@@ -1931,6 +1969,153 @@ EOF
     } > "${HY2_CLIENT_FILE}"
 }
 
+ensure_snell_capable_core() {
+    local current_version oldest confirm
+
+    if ! command -v sing-box &> /dev/null; then
+        return 0
+    fi
+
+    current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+
+    if [ -z "${current_version}" ]; then
+        return 0
+    fi
+
+    oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
+
+    if [ "${oldest}" = "1.14.0" ]; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}当前 sing-box ${current_version} 不支持 Snell v6，需要升级到 1.14.0 以上${RESET}"
+    read -p "$(echo -e "${YELLOW}是否现在升级 sing-box 核心? (Y/n) ${RESET}")" confirm
+    confirm=${confirm:-Y}
+
+    case "${confirm}" in
+        y|Y)
+            if [ "$IS_ALPINE" -eq 1 ]; then
+                apk update && apk upgrade sing-box || {
+                    echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
+                    return 1
+                }
+            else
+                bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
+                    echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
+                    return 1
+                }
+            fi
+
+            current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+            oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
+
+            if [ "${oldest}" != "1.14.0" ]; then
+                echo -e "${RED}升级后版本 ${current_version} 仍低于 1.14.0，已中止 Snell 安装${RESET}"
+                return 1
+            fi
+
+            echo -e "${GREEN}sing-box 已升级到 ${current_version}${RESET}"
+            ;;
+        *)
+            echo -e "${YELLOW}已取消升级，中止 Snell 安装${RESET}"
+            return 1
+            ;;
+    esac
+}
+
+write_snell_state() {
+    cat > "${SNELL_STATE_FILE}" << EOF
+snell_port='${snell_port}'
+snell_psk='${snell_psk}'
+snell_mode='${snell_mode}'
+EOF
+}
+
+write_snell_fragment() {
+    cat > "${SNELL_FRAGMENT_FILE}" << EOF
+    {
+      "type": "snell",
+      "tag": "snell-in",
+      "listen": "::",
+      "listen_port": ${snell_port},
+      "version": 6,
+      "psk": "${snell_psk}",
+      "mode": "${snell_mode}"
+    }
+EOF
+}
+
+write_snell_client() {
+    {
+        echo -e "${PURPLE}=============== 明文参数 ===============${RESET}"
+        echo "节点类型      : Snell v6"
+        echo "服务器IP      : ${host_ip}"
+        echo "监听端口      : ${snell_port} (TCP)"
+        echo "PSK           : ${snell_psk}"
+        echo "流量整形模式  : ${snell_mode}"
+        echo "UDP           : 走 UDP-over-TCP，无需单独放行 UDP 端口"
+
+        echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
+        echo -e "${YELLOW}${ip_country}-Snell=snell,${host_ip},${snell_port},\"${snell_psk}\",version=6${RESET}"
+
+        echo -e "\n${CYAN}=============== Clash Meta / Mihomo ===============${RESET}"
+        cat << EOF
+  - name: ${ip_country}-Snell
+    type: snell
+    server: ${host_ip}
+    port: ${snell_port}
+    psk: ${snell_psk}
+    version: "6"
+EOF
+        echo "备注: Snell v6 需要 mihomo 内核 1.19.34 以上或 sing-box 1.14 以上"
+
+        echo -e "\n${CYAN}=============== Sing-box Outbound ===============${RESET}"
+        cat << EOF
+{
+  "type": "snell",
+  "tag": "${ip_country}-Snell",
+  "server": "${host_ip}",
+  "server_port": ${snell_port},
+  "version": 6,
+  "psk": "${snell_psk}"
+}
+EOF
+    } > "${SNELL_CLIENT_FILE}"
+}
+
+install_snell_protocol() {
+    if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
+        echo -e "${YELLOW}Snell 已存在，跳过安装${RESET}"
+        return
+    fi
+
+    ensure_snell_capable_core || return 1
+
+    snell_port=$(get_valid_port "请输入 Snell TCP 监听端口 (默认随机，回车确认): ")
+
+    read -p "请输入 Snell v6 流量整形模式 default/unshaped/unsafe-raw (默认: default): " snell_mode
+    snell_mode=${snell_mode:-default}
+
+    case "${snell_mode}" in
+        default|unshaped|unsafe-raw)
+            ;;
+        *)
+            echo -e "${YELLOW}无效的模式，已改用 default${RESET}"
+            snell_mode="default"
+            ;;
+    esac
+
+    echo -e "${CYAN}正在生成 Snell PSK...${RESET}"
+    snell_psk=$(sing-box generate rand 16 --base64)
+
+    set_current_host_info
+    write_snell_state
+    write_snell_fragment
+    write_snell_client
+
+    PROTOCOL_CHANGED=1
+}
+
 install_hy2_protocol() {
     local enable_hop
 
@@ -1996,6 +2181,9 @@ install_protocols() {
             hy2)
                 install_hy2_protocol
                 ;;
+            snell)
+                install_snell_protocol
+                ;;
         esac
     done
 
@@ -2048,7 +2236,7 @@ uninstall_sing_box() {
 }
 
 has_any_protocol_fragment() {
-    [ -f "${REALITY_FRAGMENT_FILE}" ] || [ -f "${HY2_FRAGMENT_FILE}" ] || [ -f "${SHADOWTLS_FRAGMENT_FILE}" ]
+    [ -f "${REALITY_FRAGMENT_FILE}" ] || [ -f "${HY2_FRAGMENT_FILE}" ] || [ -f "${SHADOWTLS_FRAGMENT_FILE}" ] || [ -f "${SNELL_FRAGMENT_FILE}" ]
 }
 
 remove_protocols() {
@@ -2084,6 +2272,15 @@ remove_protocols() {
                     echo -e "${GREEN}已删除 Hysteria2 协议配置${RESET}"
                 else
                     echo -e "${YELLOW}Hysteria2 未安装，跳过删除${RESET}"
+                fi
+                ;;
+            snell)
+                if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
+                    rm -f "${SNELL_FRAGMENT_FILE}" "${SNELL_CLIENT_FILE}" "${SNELL_STATE_FILE}"
+                    removed=1
+                    echo -e "${GREEN}已删除 Snell 协议配置${RESET}"
+                else
+                    echo -e "${YELLOW}Snell 未安装，跳过删除${RESET}"
                 fi
                 ;;
         esac
@@ -2273,6 +2470,7 @@ show_client_summary() {
         show_protocol_client_summary "VLESS Reality" "${REALITY_CLIENT_FILE}" "vless://"
         show_protocol_client_summary "Hysteria2" "${HY2_CLIENT_FILE}" "hysteria2://"
         show_protocol_client_summary "ShadowTLS + Shadowsocks" "${SHADOWTLS_CLIENT_FILE}" "ss://"
+        show_protocol_client_summary "Snell v6" "${SNELL_CLIENT_FILE}" "snell://"
     else
         echo -e "${YELLOW}配置文件不存在: ${CLIENT_CONFIG_FILE}${RESET}"
     fi
@@ -3087,10 +3285,11 @@ show_menu() {
     menu_reset
     MENU_NEXT_NUMBER=1
     if [ ${sing_box_installed} -ne 0 ]; then
-        menu_add_auto "一键安装 Reality + HY2 + ShadowTLS" "推荐首次部署。自动安装 sing-box，依次配置三个协议，并在完成后输出全部节点。" "install_all"
+        menu_add_auto "一键安装 Reality + HY2 + ShadowTLS + Snell" "推荐首次部署。自动安装 sing-box，依次配置四个协议，并在完成后输出全部节点。" "install_all"
         menu_add_auto "仅安装 VLESS Reality" "只部署 Reality，适合需要稳定 TCP + Reality 伪装的场景。" "install_reality"
         menu_add_auto "仅安装 Hysteria2" "只部署 HY2，可在安装流程中选择是否启用 UDP 端口跳跃。" "install_hy2"
         menu_add_auto "仅安装 ShadowTLS" "只部署 ShadowTLS + Shadowsocks，兼容已有 ShadowTLS 客户端配置。" "install_shadowtls"
+        menu_add_auto "仅安装 Snell v6" "只部署 Snell v6，轻量加密 + 流量整形，需要 sing-box 1.14+ 与支持 v6 的客户端。" "install_snell"
         menu_add "0" "退出程序" "不执行任何操作，直接退出。" "exit"
         interactive_select "请选择安装方案:"
     else
@@ -3104,6 +3303,9 @@ show_menu() {
             fi
             if ! has_shadowtls_protocol; then
                 menu_add_auto "安装 ShadowTLS" "新增 ShadowTLS + Shadowsocks 协议。" "install_shadowtls"
+            fi
+            if ! has_snell_protocol; then
+                menu_add_auto "安装 Snell v6" "新增 Snell v6 协议；核心低于 1.14 时会先升级 sing-box。" "install_snell"
             fi
         fi
 
@@ -3157,7 +3359,8 @@ remove_protocols_menu() {
     menu_add "1" "删除 VLESS Reality" "删除 Reality 服务端片段和对应客户端信息。"
     menu_add "2" "删除 Hysteria2" "删除 HY2 配置、证书、客户端信息，并清理端口跳跃规则。"
     menu_add "3" "删除 ShadowTLS" "删除 ShadowTLS + Shadowsocks 入站片段和客户端信息。"
-    menu_add "4" "删除全部协议" "删除 Reality、HY2、ShadowTLS；若无剩余协议，会继续询问是否卸载核心。"
+    menu_add "4" "删除 Snell" "删除 Snell 入站片段和客户端信息。"
+    menu_add "5" "删除全部协议" "删除 Reality、HY2、ShadowTLS、Snell；若无剩余协议，会继续询问是否卸载核心。"
     menu_add "0" "返回主菜单" "不删除任何协议，回到主菜单。"
     interactive_select "请选择要删除的协议:"
     remove_choice="${MENU_CHOICE}"
@@ -3167,7 +3370,8 @@ remove_protocols_menu() {
         1) remove_protocols reality ;;
         2) remove_protocols hy2 ;;
         3) remove_protocols shadowtls ;;
-        4) remove_protocols reality hy2 shadowtls ;;
+        4) remove_protocols snell ;;
+        5) remove_protocols reality hy2 shadowtls snell ;;
         0)
             SKIP_PAUSE=1
             return
@@ -3217,7 +3421,7 @@ while true; do
     show_menu
     case "${choice}" in
         install_all)
-            install_protocols reality hy2 shadowtls
+            install_protocols reality hy2 shadowtls snell
             ;;
         install_reality)
             install_protocols reality
@@ -3227,6 +3431,9 @@ while true; do
             ;;
         install_shadowtls)
             install_protocols shadowtls
+            ;;
+        install_snell)
+            install_protocols snell
             ;;
         view_config)
             if [ ${sing_box_installed} -eq 0 ]; then
