@@ -1969,6 +1969,49 @@ EOF
     } > "${HY2_CLIENT_FILE}"
 }
 
+install_snell_core_from_github() {
+    local arch version url tmp_dir
+
+    case "$(uname -m)" in
+        x86_64)
+            arch="amd64"
+            ;;
+        aarch64|arm64)
+            arch="arm64"
+            ;;
+        *)
+            echo -e "${RED}不支持的架构: $(uname -m)${RESET}" >&2
+            return 1
+            ;;
+    esac
+
+    version=$(curl -fsSL --max-time 15 https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oE '"tag_name": *"v[0-9.]+' | cut -d'"' -f4 | sed 's/^v//')
+
+    if [ -z "${version}" ]; then
+        echo -e "${RED}无法获取 sing-box 最新版本号${RESET}" >&2
+        return 1
+    fi
+
+    echo -e "${CYAN}Alpine 仓库无 1.14 以上版本，改用 GitHub 官方 sing-box ${version}...${RESET}"
+    url="https://github.com/SagerNet/sing-box/releases/download/v${version}/sing-box-${version}-linux-${arch}.tar.gz"
+    tmp_dir=$(mktemp -d)
+
+    if ! curl -fsSL --max-time 180 "${url}" -o "${tmp_dir}/sing-box.tar.gz" || ! tar -xzf "${tmp_dir}/sing-box.tar.gz" -C "${tmp_dir}"; then
+        echo -e "${RED}下载 sing-box ${version} 失败${RESET}" >&2
+        rm -rf "${tmp_dir}"
+        return 1
+    fi
+
+    install -m755 "${tmp_dir}/sing-box-${version}-linux-${arch}/sing-box" "/usr/bin/sing-box" || {
+        echo -e "${RED}安装 sing-box 二进制失败${RESET}" >&2
+        rm -rf "${tmp_dir}"
+        return 1
+    }
+    rm -rf "${tmp_dir}"
+
+    echo -e "${GREEN}已安装 GitHub 官方 sing-box ${version}${RESET}"
+}
+
 ensure_snell_capable_core() {
     local current_version oldest confirm
 
@@ -1995,10 +2038,17 @@ ensure_snell_capable_core() {
     case "${confirm}" in
         y|Y)
             if [ "$IS_ALPINE" -eq 1 ]; then
-                apk update && apk upgrade sing-box || {
-                    echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
-                    return 1
-                }
+                apk update && apk upgrade sing-box || true
+
+                current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+                oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
+
+                if [ "${oldest}" != "1.14.0" ]; then
+                    install_snell_core_from_github || {
+                        echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
+                        return 1
+                    }
+                fi
             else
                 bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
                     echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
@@ -3160,7 +3210,7 @@ build_state_panel_cache() {
         service_text="${YELLOW}未运行${RESET}"
     fi
 
-    protocol_text="Reality $(protocol_status_text has_reality_protocol) | HY2 $(protocol_status_text has_hy2_protocol) | ShadowTLS $(protocol_status_text has_shadowtls_protocol)"
+    protocol_text="Reality $(protocol_status_text has_reality_protocol) | HY2 $(protocol_status_text has_hy2_protocol) | ShadowTLS $(protocol_status_text has_shadowtls_protocol) | Snell $(protocol_status_text has_snell_protocol)"
     upstream_text="$(upstream_outbound_status_text)"
     log_text="$(log_status_text)"
     firewall_text="$(firewall_backend_label)"
@@ -3444,7 +3494,7 @@ firewall_menu() {
     while true; do
         menu_reset
         menu_add "1" "检测当前防火墙状态" "读取当前防火墙后端、脚本管理记录，并逐项检查已配置协议端口是否放行。"
-        menu_add "2" "自动放行当前协议端口" "按当前 Reality / HY2 / ShadowTLS 配置放行端口；若 HY2 启用端口跳跃，也会应用跳跃重定向规则。"
+        menu_add "2" "自动放行当前协议端口" "按当前 Reality / HY2 / ShadowTLS / Snell 配置放行端口；若 HY2 启用端口跳跃，也会应用跳跃重定向规则。"
         menu_add "3" "复原脚本管理的防火墙规则" "删除本脚本自动放行的端口规则，并移除 HY2 端口跳跃重定向服务。"
         menu_add "0" "返回主菜单" "不修改防火墙，回到主菜单。"
         interactive_select "请选择防火墙操作:"
