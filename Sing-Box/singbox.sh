@@ -147,13 +147,13 @@ get_valid_port() {
 
         if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
             if is_port_in_use "$port"; then
-                echo -e "${RED}端口 $port 已被占用，请选择其他端口。${RESET}"
+                echo -e "${RED}端口 $port 已被占用，请选择其他端口。${RESET}" >&2
             else
                 echo "$port"
                 return
             fi
         else
-            echo -e "${RED}请输入一个有效的端口号（1-65535）${RESET}"
+            echo -e "${RED}请输入一个有效的端口号（1-65535）${RESET}" >&2
         fi
     done
 }
@@ -993,7 +993,7 @@ get_valid_mbps() {
             return
         fi
 
-        echo -e "${RED}请输入大于 0 的整数 Mbps 数值${RESET}"
+        echo -e "${RED}请输入大于 0 的整数 Mbps 数值${RESET}" >&2
     done
 }
 
@@ -1012,7 +1012,7 @@ get_valid_interval() {
             return
         fi
 
-        echo -e "${RED}请输入不小于 5 秒的间隔，例如 30s${RESET}"
+        echo -e "${RED}请输入不小于 5 秒的间隔，例如 30s${RESET}" >&2
     done
 }
 
@@ -1036,7 +1036,7 @@ get_valid_port_range() {
             fi
         fi
 
-        echo -e "${RED}请输入有效端口范围，例如 20000:50000${RESET}"
+        echo -e "${RED}请输入有效端口范围，例如 20000:50000${RESET}" >&2
     done
 }
 
