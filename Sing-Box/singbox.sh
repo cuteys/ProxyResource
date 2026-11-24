@@ -2056,7 +2056,7 @@ write_snell_client() {
         echo "UDP           : 走 UDP-over-TCP，无需单独放行 UDP 端口"
 
         echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
-        echo -e "${YELLOW}${ip_country}-Snell=snell,${host_ip},${snell_port},\"${snell_psk}\",version=6${RESET}"
+        echo -e "${YELLOW}${ip_country}-Snell = snell,${host_ip},${snell_port},\"${snell_psk}\",version=6,udp=true,block-quic=true${RESET}"
 
         echo -e "\n${CYAN}=============== Clash Meta / Mihomo ===============${RESET}"
         cat << EOF
