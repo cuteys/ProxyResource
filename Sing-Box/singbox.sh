@@ -2002,6 +2002,15 @@ install_snell_core_from_github() {
         return 1
     fi
 
+    if command -v apk &> /dev/null; then
+        echo -e "${CYAN}官方二进制为 glibc 动态链接，安装 gcompat 兼容层...${RESET}"
+        apk add --no-cache gcompat || {
+            echo -e "${RED}安装 gcompat 兼容层失败${RESET}" >&2
+            rm -rf "${tmp_dir}"
+            return 1
+        }
+    fi
+
     install -m755 "${tmp_dir}/sing-box-${version}-linux-${arch}/sing-box" "/usr/bin/sing-box" || {
         echo -e "${RED}安装 sing-box 二进制失败${RESET}" >&2
         rm -rf "${tmp_dir}"
@@ -2038,39 +2047,34 @@ ensure_snell_capable_core() {
     case "${confirm}" in
         y|Y)
             if [ "$IS_ALPINE" -eq 1 ]; then
-                apk update && apk upgrade sing-box || true
-
-                current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
-                oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
-
-                if [ "${oldest}" != "1.14.0" ]; then
-                    install_snell_core_from_github || {
-                        echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
-                        return 1
-                    }
-                fi
+                install_snell_core_from_github || {
+                    echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
+                    return 1
+                }
             else
                 bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
                     echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
                     return 1
                 }
             fi
-
-            current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
-            oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
-
-            if [ "${oldest}" != "1.14.0" ]; then
-                echo -e "${RED}升级后版本 ${current_version} 仍低于 1.14.0，已中止 Snell 安装${RESET}"
-                return 1
-            fi
-
-            echo -e "${GREEN}sing-box 已升级到 ${current_version}${RESET}"
             ;;
         *)
             echo -e "${YELLOW}已取消升级，中止 Snell 安装${RESET}"
             return 1
             ;;
     esac
+
+    current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+    oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
+
+    if [ "${oldest}" != "1.14.0" ]; then
+        echo -e "${RED}升级后 sing-box version 实际输出:${RESET}"
+        sing-box version 2>&1 | head -n3
+        echo -e "${RED}升级后版本 ${current_version} 仍低于 1.14.0，已中止 Snell 安装${RESET}"
+        return 1
+    fi
+
+    echo -e "${GREEN}sing-box 已升级到 ${current_version}${RESET}"
 }
 
 write_snell_state() {
