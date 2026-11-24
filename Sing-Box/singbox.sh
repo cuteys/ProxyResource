@@ -2799,6 +2799,64 @@ change_reality_port() {
     fi
 }
 
+change_snell_port() {
+    local current_port new_port tmp_file
+
+    import_existing_protocols
+
+    if [ ! -f "${SNELL_FRAGMENT_FILE}" ]; then
+        echo -e "${RED}Snell 尚未安装${RESET}"
+        return
+    fi
+
+    check_ss_command
+
+    current_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${SNELL_FRAGMENT_FILE}")
+    if [ -z "${current_port}" ]; then
+        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}"
+        return
+    fi
+
+    new_port=$(get_valid_port "请输入新的 Snell 监听端口 (当前 ${current_port}，默认随机，回车确认): ")
+
+    if [ "${new_port}" = "${current_port}" ]; then
+        echo -e "${YELLOW}配置未变化，已取消修改${RESET}"
+        return
+    fi
+
+    tmp_file="${SNELL_FRAGMENT_FILE}.tmp"
+    if ! awk -v new_port="${new_port}" '
+        /"listen_port"/ && changed == 0 {
+            sub(/"listen_port"[[:space:]]*:[[:space:]]*[0-9]+/, "\"listen_port\": " new_port)
+            changed = 1
+        }
+        { print }
+    ' "${SNELL_FRAGMENT_FILE}" > "${tmp_file}"; then
+        echo -e "${RED}更新服务端配置失败${RESET}"
+        rm -f "${tmp_file}"
+        return
+    fi
+    mv "${tmp_file}" "${SNELL_FRAGMENT_FILE}"
+
+    snell_port=${new_port}
+    snell_psk=$(awk -F\" '/"psk"[[:space:]]*:/ { print $4; exit }' "${SNELL_FRAGMENT_FILE}")
+    snell_mode=$(awk -F\" '/"mode"[[:space:]]*:/ { print $4; exit }' "${SNELL_FRAGMENT_FILE}")
+    write_snell_state
+    set_current_host_info
+    write_snell_client
+
+    render_config
+    render_client_config
+    restart_sing_box
+    if is_sing_box_running; then
+        echo -e "${GREEN}Snell 监听端口已从 ${current_port} 修改为 ${new_port}${RESET}"
+        echo -e "${YELLOW}端口变更不会自动修改防火墙，请到防火墙菜单执行自动放行${RESET}"
+        show_client_summary
+    else
+        echo -e "${RED}端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
+    fi
+}
+
 change_shadowtls_port() {
     import_existing_protocols
 
@@ -3320,7 +3378,7 @@ show_menu() {
         menu_add_auto "查看 sing-box 状态" "调用系统服务管理器查看 sing-box 当前运行状态。" "status"
         menu_add_auto "查看 sing-box 日志" "实时跟踪 sing-box 日志，按 Ctrl+C 退出日志查看。" "logs"
         menu_add_auto "日志开关 / 清理" "开启或关闭 sing-box 日志；关闭时会清理历史日志，降低连接者 IP 暴露风险。" "logging"
-        menu_add_auto "修改端口 / HY2 端口跳跃" "修改 Reality、HY2、ShadowTLS 端口，或重新配置 HY2 端口跳跃。" "change_ports"
+        menu_add_auto "修改端口 / HY2 端口跳跃" "修改 Reality、HY2、ShadowTLS、Snell 端口，或重新配置 HY2 端口跳跃。" "change_ports"
         menu_add_auto "防火墙检测 / 自动放行" "检测防火墙后端，或手动放行当前协议端口；安装和改端口不会自动修改防火墙。" "firewall"
         menu_add_auto "删除指定协议" "选择并删除某个协议；如果没有剩余协议，会询问是否同时卸载。" "remove_protocol"
         menu_add_auto "完全卸载 sing-box" "停止服务并删除 sing-box、配置目录、日志和 HY2 端口跳跃规则。" "uninstall"
@@ -3337,6 +3395,7 @@ change_ports_menu() {
     menu_add "1" "VLESS Reality 端口 / 伪装域名" "修改 Reality 入站监听端口或伪装域名，并同步更新客户端分享信息。"
     menu_add "2" "Hysteria2 端口 / SNI / 端口跳跃" "修改 HY2 UDP 监听端口、TLS SNI，或开启、关闭、调整端口跳跃范围。"
     menu_add "3" "ShadowTLS 端口 / 伪装域名" "修改 ShadowTLS 外层端口、Shadowsocks 内层端口或 ShadowTLS 伪装域名。"
+    menu_add "4" "Snell 端口" "修改 Snell 入站监听端口，并同步更新客户端信息。"
     menu_add "0" "返回主菜单" "不修改端口，回到主菜单。"
     interactive_select "请选择要修改的协议:"
     change_choice="${MENU_CHOICE}"
@@ -3346,6 +3405,7 @@ change_ports_menu() {
         1) change_reality_port ;;
         2) change_hy2_port ;;
         3) change_shadowtls_port ;;
+        4) change_snell_port ;;
         0)
             SKIP_PAUSE=1
             return
