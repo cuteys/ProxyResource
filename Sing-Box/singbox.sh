@@ -2016,6 +2016,21 @@ install_snell_core_from_github() {
         rm -rf "${tmp_dir}"
         return 1
     }
+
+    if ! sing-box version &> /dev/null; then
+        if [ "${arch}" = "amd64" ] && [ ! -e /lib64/ld-linux-x86-64.so.2 ]; then
+            echo -e "${CYAN}创建 /lib64 动态链接器兼容链接...${RESET}"
+            mkdir -p /lib64
+            ln -sf /lib/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+        fi
+
+        if ! sing-box version &> /dev/null; then
+            echo -e "${RED}sing-box 二进制仍无法执行，请检查架构与依赖${RESET}" >&2
+            rm -rf "${tmp_dir}"
+            return 1
+        fi
+    fi
+
     rm -rf "${tmp_dir}"
 
     echo -e "${GREEN}已安装 GitHub 官方 sing-box ${version}${RESET}"
@@ -2031,7 +2046,31 @@ ensure_snell_capable_core() {
     current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
 
     if [ -z "${current_version}" ]; then
-        return 0
+        echo -e "${YELLOW}sing-box 存在但无法执行，疑似官方二进制缺少 glibc 兼容层${RESET}"
+        read -p "$(echo -e "${YELLOW}是否现在重装官方 sing-box 二进制修复? (Y/n) ${RESET}")" confirm
+        confirm=${confirm:-Y}
+
+        case "${confirm}" in
+            y|Y)
+                install_snell_core_from_github || {
+                    echo -e "${RED}sing-box 修复失败，已中止 Snell 安装${RESET}"
+                    return 1
+                }
+                ;;
+            *)
+                echo -e "${YELLOW}已取消修复，中止 Snell 安装${RESET}"
+                return 1
+                ;;
+        esac
+
+        current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+
+        if [ -n "${current_version}" ]; then
+            return 0
+        fi
+
+        echo -e "${RED}sing-box 修复后仍无法执行，已中止 Snell 安装${RESET}"
+        return 1
     fi
 
     oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
@@ -2160,7 +2199,7 @@ install_snell_protocol() {
     esac
 
     echo -e "${CYAN}正在生成 Snell PSK...${RESET}"
-    snell_psk=$(sing-box generate rand 16 --base64)
+    snell_psk=$(head -c 16 /dev/urandom | base64 | tr -d '\n')
 
     set_current_host_info
     write_snell_state
