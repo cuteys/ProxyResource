@@ -1904,7 +1904,7 @@ write_hy2_client() {
         echo -e "${YELLOW}${hy2_uri}${RESET}"
 
         echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
-        echo -e "${YELLOW}${ip_country}-HY2=Hysteria2,${host_ip},${hy2_port},\"${hy2_password}\",tls-name=${hy2_sni},skip-cert-verify=true,salamander-password=${hy2_obfs_password},fast-open=false${RESET}"
+        echo -e "${YELLOW}${ip_country}-HY2 = Hysteria2,${host_ip},${hy2_port},\"${hy2_password}\",tls-name=${hy2_sni},skip-cert-verify=true,salamander-password=${hy2_obfs_password},fast-open=false${RESET}"
 
         echo -e "\n${CYAN}=============== Clash Meta / Mihomo ===============${RESET}"
         cat << EOF
