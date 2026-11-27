@@ -28,6 +28,9 @@ REALITY_CLIENT_FILE="${CLIENT_DIR}/reality.txt"
 SHADOWTLS_CLIENT_FILE="${CLIENT_DIR}/shadowtls.txt"
 HY2_CLIENT_FILE="${CLIENT_DIR}/hy2.txt"
 SNELL_CLIENT_FILE="${CLIENT_DIR}/snell.txt"
+VLESSWS_FRAGMENT_FILE="${PROTOCOL_DIR}/vlessws.json"
+VLESSWS_STATE_FILE="${PROTOCOL_DIR}/vlessws.env"
+VLESSWS_CLIENT_FILE="${CLIENT_DIR}/vlessws.txt"
 HY2_CERT_FILE="${CERT_DIR}/hy2.crt"
 HY2_KEY_FILE="${CERT_DIR}/hy2.key"
 HY2_PORT_HOP_FILE="${CONFIG_DIR}/hy2-port-hop.sh"
@@ -557,6 +560,7 @@ protocol_fragment_file() {
         shadowtls) echo "${SHADOWTLS_FRAGMENT_FILE}" ;;
         hy2) echo "${HY2_FRAGMENT_FILE}" ;;
         snell) echo "${SNELL_FRAGMENT_FILE}" ;;
+        vlessws) echo "${VLESSWS_FRAGMENT_FILE}" ;;
         *) return 1 ;;
     esac
 }
@@ -567,6 +571,7 @@ protocol_label() {
         shadowtls) echo "ShadowTLS" ;;
         hy2) echo "Hysteria2" ;;
         snell) echo "Snell" ;;
+        vlessws) echo "VLESS WS TLS" ;;
         *) echo "$1" ;;
     esac
 }
@@ -580,6 +585,7 @@ config_has_protocol() {
         shadowtls) pattern='"type"[[:space:]]*:[[:space:]]*"shadowtls"' ;;
         hy2) pattern='"tag"[[:space:]]*:[[:space:]]*"hy2-in"' ;;
         snell) pattern='"tag"[[:space:]]*:[[:space:]]*"snell-in"' ;;
+        vlessws) pattern='"tag"[[:space:]]*:[[:space:]]*"vlessws-in"' ;;
         *) return 1 ;;
     esac
 
@@ -594,7 +600,7 @@ has_protocol() {
 }
 
 has_all_protocols() {
-    has_protocol reality && has_protocol hy2 && has_protocol shadowtls && has_protocol snell
+    has_protocol reality && has_protocol hy2 && has_protocol shadowtls && has_protocol snell && has_protocol vlessws
 }
 
 extract_fragment_listen_port() {
@@ -635,6 +641,9 @@ extract_inbounds_to_fragment() {
             }
             if (protocol == "snell") {
                 return block ~ /"tag"[[:space:]]*:[[:space:]]*"snell-in"/
+            }
+            if (protocol == "vlessws") {
+                return block ~ /"tag"[[:space:]]*:[[:space:]]*"vlessws-in"/
             }
             return block ~ /"tag"[[:space:]]*:[[:space:]]*"shadowsocks-in"/ || block ~ /"type"[[:space:]]*:[[:space:]]*"shadowtls"/
         }
@@ -691,6 +700,45 @@ extract_inbounds_to_fragment() {
     fi
 
     mv "${tmp_file}" "${output_file}"
+
+    # 导入片段若缺证书提供者引用则补齐，避免旧配置还原后入站无证书
+    if [ "${protocol}" = "vlessws" ] && ! grep -q '"certificate_provider"' "${output_file}"; then
+        awk '
+            {
+                if (!in_tls) {
+                    print
+                    if ($0 ~ /"tls"/) {
+                        in_tls = 1
+                        tls_indent = $0
+                        sub(/[^[:space:]].*/, "", tls_indent)
+                    }
+                    next
+                }
+                if ($0 ~ ("^" tls_indent "}[[:space:]]*$")) {
+                    if (prev != "" && prev !~ /,[[:space:]]*$/) {
+                        sub(/[[:space:]]*$/, ",", prev)
+                    }
+                    if (prev != "") {
+                        print prev
+                    }
+                    print tls_indent "    \"certificate_provider\": \"vlessws-cert\""
+                    print $0
+                    in_tls = 0
+                    prev = ""
+                    next
+                }
+                if (prev != "") {
+                    print prev
+                }
+                prev = $0
+            }
+            END {
+                if (prev != "") {
+                    print prev
+                }
+            }
+        ' "${output_file}" > "${tmp_file}" && mv "${tmp_file}" "${output_file}"
+    fi
 }
 
 import_marked_client_section() {
@@ -734,6 +782,7 @@ import_existing_clients() {
         [ -f "${HY2_CLIENT_FILE}" ] || import_marked_client_section "Hysteria2" "${HY2_CLIENT_FILE}"
         [ -f "${SHADOWTLS_CLIENT_FILE}" ] || import_marked_client_section "ShadowTLS + Shadowsocks" "${SHADOWTLS_CLIENT_FILE}"
         [ -f "${SNELL_CLIENT_FILE}" ] || import_marked_client_section "Snell" "${SNELL_CLIENT_FILE}"
+        [ -f "${VLESSWS_CLIENT_FILE}" ] || import_marked_client_section "VLESS WS TLS" "${VLESSWS_CLIENT_FILE}"
         return
     fi
 
@@ -755,7 +804,7 @@ import_existing_protocols() {
         return
     fi
 
-    for protocol in reality shadowtls hy2 snell; do
+    for protocol in reality shadowtls hy2 snell vlessws; do
         fragment_file=$(protocol_fragment_file "${protocol}")
         if config_has_protocol "${protocol}" && [ ! -f "${fragment_file}" ]; then
             echo -e "${CYAN}检测到现有 $(protocol_label "${protocol}") 配置，正在导入以便合并管理...${RESET}"
@@ -764,6 +813,32 @@ import_existing_protocols() {
     done
 
     import_existing_clients
+}
+
+# 证书签发数据固定落在状态目录 acme 子目录以支持续期持久化
+render_certificate_providers() {
+    local domain
+
+    domain=""
+    if load_vlessws_state >/dev/null 2>&1; then
+        domain="${vlessws_domain}"
+    fi
+    if [ -z "${domain}" ] && [ -f "${VLESSWS_FRAGMENT_FILE}" ]; then
+        domain=$(extract_json_string_field "server_name" "${VLESSWS_FRAGMENT_FILE}")
+    fi
+
+    [ -n "${domain}" ] || return 0
+
+    cat << EOF
+  "certificate_providers": [
+    {
+      "type": "acme",
+      "tag": "vlessws-cert",
+      "domain": ["${domain}"],
+      "data_directory": "${CONFIG_DIR}/acme"
+    }
+  ],
+EOF
 }
 
 render_config() {
@@ -829,11 +904,13 @@ EOF
 EOF
         fi
 
+        render_certificate_providers
+
         cat << EOF
   "inbounds": [
 EOF
 
-        for fragment_file in "${REALITY_FRAGMENT_FILE}" "${HY2_FRAGMENT_FILE}" "${SHADOWTLS_FRAGMENT_FILE}" "${SNELL_FRAGMENT_FILE}"; do
+        for fragment_file in "${REALITY_FRAGMENT_FILE}" "${HY2_FRAGMENT_FILE}" "${SHADOWTLS_FRAGMENT_FILE}" "${SNELL_FRAGMENT_FILE}" "${VLESSWS_FRAGMENT_FILE}"; do
             if [ -f "${fragment_file}" ]; then
                 if [ "${first}" -eq 0 ]; then
                     echo ","
@@ -886,7 +963,8 @@ render_client_config() {
         append_client_section "VLESS Reality" "${REALITY_CLIENT_FILE}"
         append_client_section "Hysteria2" "${HY2_CLIENT_FILE}"
         append_client_section "ShadowTLS + Shadowsocks" "${SHADOWTLS_CLIENT_FILE}"
-        append_client_section "Snell" "${SNELL_CLIENT_FILE}" 0
+        append_client_section "Snell" "${SNELL_CLIENT_FILE}" 1
+        append_client_section "VLESS WS TLS" "${VLESSWS_CLIENT_FILE}" 0
     } > "${CLIENT_CONFIG_FILE}"
 }
 
@@ -1477,7 +1555,7 @@ add_firewall_rule_once() {
 }
 
 apply_current_firewall_rules() {
-    local backend reality_port shadow_ports shadow_ssport shadow_sport snell_port
+    local backend reality_port shadow_ports shadow_ssport shadow_sport snell_port vlessws_port
     local hy2_port hy2_password hy2_obfs_password hy2_sni hy2_up_mbps hy2_down_mbps hy2_hop_enabled hy2_hop_range hy2_hop_interval
 
     ensure_state_dirs
@@ -1523,13 +1601,18 @@ apply_current_firewall_rules() {
         [ -n "${snell_port}" ] && add_firewall_rule_once "${backend}" "tcp" "${snell_port}" "Snell"
     fi
 
+    if [ -f "${VLESSWS_FRAGMENT_FILE}" ]; then
+        vlessws_port=$(extract_fragment_listen_port "${VLESSWS_FRAGMENT_FILE}")
+        [ -n "${vlessws_port}" ] && add_firewall_rule_once "${backend}" "tcp" "${vlessws_port}" "VLESS WS TLS"
+    fi
+
     if [ ! -s "${FIREWALL_STATE_FILE}" ]; then
         rm -f "${FIREWALL_STATE_FILE}"
     fi
 }
 
 show_firewall_status() {
-    local backend reality_port shadow_ports shadow_ssport shadow_sport snell_port printed_ports
+    local backend reality_port shadow_ports shadow_ssport shadow_sport snell_port vlessws_port printed_ports
     local hy2_port hy2_password hy2_obfs_password hy2_sni hy2_up_mbps hy2_down_mbps hy2_hop_enabled hy2_hop_range hy2_hop_interval
 
     import_existing_protocols
@@ -1578,6 +1661,12 @@ show_firewall_status() {
     if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
         snell_port=$(extract_fragment_listen_port "${SNELL_FRAGMENT_FILE}")
         print_firewall_port_status "${backend}" "Snell" "tcp" "${snell_port}"
+        printed_ports=1
+    fi
+
+    if [ -f "${VLESSWS_FRAGMENT_FILE}" ]; then
+        vlessws_port=$(extract_fragment_listen_port "${VLESSWS_FRAGMENT_FILE}")
+        print_firewall_port_status "${backend}" "VLESS WS TLS" "tcp" "${vlessws_port}"
         printed_ports=1
     fi
 
@@ -2272,6 +2361,319 @@ install_hy2_protocol() {
     protocol_changed=1
 }
 
+# 逐个比对已有协议入站端口以避免新入站与现有协议互踩
+find_vlessws_port_conflict() {
+    local port=$1
+    local check_port shadow_ports shadow_ssport shadow_sport
+    local hy2_port hy2_password hy2_obfs_password hy2_sni hy2_up_mbps hy2_down_mbps hy2_hop_enabled hy2_hop_range hy2_hop_interval
+
+    if [ -f "${REALITY_FRAGMENT_FILE}" ]; then
+        check_port=$(extract_fragment_listen_port "${REALITY_FRAGMENT_FILE}")
+        if [ "${check_port}" = "${port}" ]; then
+            echo "VLESS Reality"
+            return 0
+        fi
+    fi
+
+    if [ -f "${HY2_FRAGMENT_FILE}" ] && load_hy2_state >/dev/null 2>&1; then
+        if [ "${hy2_port}" = "${port}" ]; then
+            echo "Hysteria2"
+            return 0
+        fi
+    fi
+
+    if [ -f "${SHADOWTLS_FRAGMENT_FILE}" ]; then
+        shadow_ports=$(extract_shadowtls_ports)
+        IFS=' ' read -r shadow_ssport shadow_sport <<< "${shadow_ports}" || true
+        if [ "${shadow_ssport}" = "${port}" ] || [ "${shadow_sport}" = "${port}" ]; then
+            echo "ShadowTLS"
+            return 0
+        fi
+    fi
+
+    if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
+        check_port=$(extract_fragment_listen_port "${SNELL_FRAGMENT_FILE}")
+        if [ "${check_port}" = "${port}" ]; then
+            echo "Snell"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# 默认 443 并叠加占用与协议冲突检查以复用统一端口口径
+get_vlessws_listen_port() {
+    local prompt=$1
+    local port conflict
+
+    while true; do
+        read -r -p "${prompt}" port
+        port=${port:-443}
+
+        if ! is_valid_port "${port}"; then
+            echo -e "${RED}请输入一个有效的端口号（1-65535）${RESET}" >&2
+            continue
+        fi
+
+        if is_port_in_use "${port}"; then
+            echo -e "${RED}端口 ${port} 已被占用，请选择其他端口。${RESET}" >&2
+            continue
+        fi
+
+        conflict=$(find_vlessws_port_conflict "${port}")
+        if [ -n "${conflict}" ]; then
+            echo -e "${RED}端口 ${port} 与 ${conflict} 入站端口冲突，请更换端口。${RESET}" >&2
+            continue
+        fi
+
+        echo "${port}"
+        return
+    done
+}
+
+# 低于 1.14.0 的核心无法解析新式 certificate_providers 写法时直接拒装
+ensure_vlessws_capable_core() {
+    local current_version
+
+    if ! is_sing_box_installed; then
+        return 0
+    fi
+
+    current_version=$(get_sing_box_version)
+
+    if [ -n "${current_version}" ] && is_version_at_least "${current_version}" "1.14.0"; then
+        return 0
+    fi
+
+    echo -e "${RED}当前 sing-box ${current_version:-版本未知} 低于 1.14.0，不支持 VLESS WS TLS 所需的 certificate_providers 写法，请先升级核心再安装${RESET}" >&2
+    return 1
+}
+
+# 域名解析与出口 IP 仅作提醒不阻断，实际签发以可达性为准
+prompt_vlessws_domain() {
+    local domain resolved_ip
+
+    set_current_host_info
+    domain=$(get_required_value "请输入 VLESS WS TLS 绑定域名: ")
+    resolved_ip=$(getent hosts "${domain}" 2>/dev/null | awk '{print $1; exit}')
+
+    if [ -z "${resolved_ip}" ]; then
+        echo -e "${YELLOW}警告：域名 ${domain} 当前未解析出 IP，可继续，但 ACME 签发可能失败${RESET}" >&2
+    elif [ "${HOST_IP}" != "YOUR_SERVER_IP" ] && [ "${resolved_ip}" != "${HOST_IP}" ]; then
+        echo -e "${YELLOW}警告：域名 ${domain} 解析到 ${resolved_ip}，与本机出口 IP ${HOST_IP} 不一致，可能解析尚未生效${RESET}" >&2
+    fi
+
+    echo "${domain}"
+}
+
+write_vlessws_state() {
+    cat > "${VLESSWS_STATE_FILE}" << EOF
+vlessws_port='${vlessws_port}'
+vlessws_uuid='${vlessws_uuid}'
+vlessws_domain='$(shell_single_quote_escape "${vlessws_domain}")'
+vlessws_path='$(shell_single_quote_escape "${vlessws_path}")'
+EOF
+}
+
+load_vlessws_state() {
+    if [ ! -f "${VLESSWS_STATE_FILE}" ]; then
+        echo -e "${RED}缺少 VLESS WS TLS 状态文件，无法安全修改。建议删除后重新安装 VLESS WS TLS。${RESET}" >&2
+        return 1
+    fi
+
+    # shellcheck disable=SC1090
+    . "${VLESSWS_STATE_FILE}"
+}
+
+write_vlessws_fragment() {
+    cat > "${VLESSWS_FRAGMENT_FILE}" << EOF
+    {
+      "type": "vless",
+      "tag": "vlessws-in",
+      "listen": "::",
+      "listen_port": ${vlessws_port},
+      "users": [
+        {
+          "uuid": "$(json_escape "${vlessws_uuid}")"
+        }
+      ],
+      "transport": {
+        "type": "ws",
+        "path": "$(json_escape "${vlessws_path}")",
+        "headers": {
+          "host": "$(json_escape "${vlessws_domain}")"
+        },
+        "max_early_data": 2048,
+        "early_data_header_name": "Sec-WebSocket-Protocol"
+      },
+      "tls": {
+        "enabled": true,
+        "server_name": "$(json_escape "${vlessws_domain}")",
+        "certificate_provider": "vlessws-cert"
+      }
+    }
+EOF
+}
+
+write_vlessws_client() {
+    {
+        echo -e "${PURPLE}=============== 明文参数 ===============${RESET}"
+        echo "节点类型      : VLESS WS TLS"
+        echo "连接域名      : ${vlessws_domain}"
+        echo "监听端口      : ${vlessws_port} (TCP)"
+        echo "UUID          : ${vlessws_uuid}"
+        echo "WS 路径       : ${vlessws_path}"
+        echo "加密方式      : none"
+        echo "TLS           : ACME 自动签发证书"
+        echo "0-RTT         : 已启用 (max_early_data 2048)"
+
+        echo -e "\n${CYAN}=============== 通用分享链接 ===============${RESET}"
+        echo -e "${YELLOW}vless://${vlessws_uuid}@${vlessws_domain}:${vlessws_port}?encryption=none&security=tls&sni=${vlessws_domain}&type=ws&host=${vlessws_domain}&path=${vlessws_path}#VLESSWS-${vlessws_domain}${RESET}"
+
+        echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
+        echo -e "${YELLOW}${IP_COUNTRY}-VLESSWS = VLESS,${vlessws_domain},${vlessws_port},\"${vlessws_uuid}\",transport=ws,path=${vlessws_path},host=${vlessws_domain},over-tls=true,sni=${vlessws_domain},udp=true${RESET}"
+
+        echo -e "\n${CYAN}=============== Clash Meta / Mihomo ===============${RESET}"
+        cat << EOF
+  - name: ${IP_COUNTRY}-VLESSWS
+    type: vless
+    server: ${vlessws_domain}
+    port: ${vlessws_port}
+    uuid: ${vlessws_uuid}
+    network: ws
+    tls: true
+    udp: true
+    servername: ${vlessws_domain}
+    ws-opts:
+      path: ${vlessws_path}
+      headers:
+        Host: ${vlessws_domain}
+EOF
+
+        echo -e "\n${CYAN}=============== Sing-box Outbound ===============${RESET}"
+        cat << EOF
+{
+  "type": "vless",
+  "tag": "${IP_COUNTRY}-VLESSWS",
+  "server": "${vlessws_domain}",
+  "server_port": ${vlessws_port},
+  "uuid": "${vlessws_uuid}",
+  "tls": {
+    "enabled": true,
+    "server_name": "${vlessws_domain}"
+  },
+  "transport": {
+    "type": "ws",
+    "path": "${vlessws_path}",
+    "headers": {
+      "Host": "${vlessws_domain}"
+    },
+    "max_early_data": 2048,
+    "early_data_header_name": "Sec-WebSocket-Protocol"
+  }
+}
+EOF
+        echo -e "${GREEN}================================================================${RESET}"
+    } > "${VLESSWS_CLIENT_FILE}"
+}
+
+install_vlessws_protocol() {
+    local vlessws_port vlessws_uuid vlessws_domain vlessws_path
+
+    if [ -f "${VLESSWS_FRAGMENT_FILE}" ]; then
+        echo -e "${YELLOW}VLESS WS TLS 已存在，跳过安装${RESET}"
+        return
+    fi
+
+    ensure_vlessws_capable_core || return 1
+
+    vlessws_domain=$(prompt_vlessws_domain)
+    vlessws_port=$(get_vlessws_listen_port "请输入 VLESS WS TLS 监听端口 (默认 443，回车确认): ")
+
+    if is_port_in_use 80; then
+        echo -e "${YELLOW}警告：端口 80 已被占用，ACME HTTP-01 校验无法完成，证书签发会失败${RESET}" >&2
+        if ! confirm_yes_default "${YELLOW}" "是否继续安装? 如需自动签发证书请先腾出 80 端口"; then
+            echo -e "${YELLOW}已取消 VLESS WS TLS 安装${RESET}"
+            return 1
+        fi
+    fi
+
+    echo -e "${CYAN}正在生成 UUID...${RESET}"
+    vlessws_uuid=$(sing-box generate uuid)
+
+    read -r -p "请输入自定义 WS 路径 (默认: /${vlessws_uuid}，回车确认): " vlessws_path
+    vlessws_path=${vlessws_path:-/${vlessws_uuid}}
+    if [ "${vlessws_path#/}" = "${vlessws_path}" ]; then
+        vlessws_path="/${vlessws_path}"
+    fi
+    # path 进入分享链接 query 与状态文件，限定安全字符避免拼装错位
+    if ! [[ "${vlessws_path}" =~ ^/[A-Za-z0-9_./-]*$ ]]; then
+        echo -e "${RED}WS 路径仅限字母数字与 _ . / - 字符，已放弃安装${RESET}" >&2
+        return 1
+    fi
+
+    write_vlessws_state
+    write_vlessws_fragment
+    write_vlessws_client
+
+    protocol_changed=1
+}
+
+change_vlessws_port() {
+    local current_port new_port tmp_file vlessws_port vlessws_uuid vlessws_domain vlessws_path
+
+    import_existing_protocols
+
+    if [ ! -f "${VLESSWS_FRAGMENT_FILE}" ]; then
+        echo -e "${RED}VLESS WS TLS 尚未安装${RESET}" >&2
+        return
+    fi
+
+    check_ss_command
+
+    current_port=$(extract_fragment_listen_port "${VLESSWS_FRAGMENT_FILE}")
+    if [ -z "${current_port}" ]; then
+        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}" >&2
+        return
+    fi
+
+    load_vlessws_state || return
+
+    new_port=$(get_vlessws_listen_port "请输入新的 VLESS WS TLS 监听端口 (当前 ${current_port}，默认 443，回车确认): ")
+
+    if [ "${new_port}" = "${current_port}" ]; then
+        echo -e "${YELLOW}配置未变化，已取消修改${RESET}"
+        return
+    fi
+
+    tmp_file="${VLESSWS_FRAGMENT_FILE}.tmp"
+    if ! awk -v new_port="${new_port}" '
+        /"listen_port"/ && changed == 0 {
+            sub(/"listen_port"[[:space:]]*:[[:space:]]*[0-9]+/, "\"listen_port\": " new_port)
+            changed = 1
+        }
+        { print }
+    ' "${VLESSWS_FRAGMENT_FILE}" > "${tmp_file}"; then
+        echo -e "${RED}更新服务端配置失败${RESET}" >&2
+        rm -f "${tmp_file}"
+        return
+    fi
+    mv "${tmp_file}" "${VLESSWS_FRAGMENT_FILE}"
+
+    vlessws_port=${new_port}
+    write_vlessws_state
+    set_current_host_info
+    write_vlessws_client
+
+    if apply_config_and_restart "端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志"; then
+        echo -e "${GREEN}VLESS WS TLS 监听端口已从 ${current_port} 修改为 ${new_port}${RESET}"
+        echo -e "${YELLOW}域名与 WS 路径如需变更请删除本协议后重新安装${RESET}"
+        echo -e "${YELLOW}端口变更不会自动修改防火墙，请到防火墙菜单执行自动放行${RESET}"
+        show_client_summary
+    fi
+}
+
 install_protocols() {
     local protocol_changed=0
     local protocol
@@ -2294,6 +2696,9 @@ install_protocols() {
                 ;;
             snell)
                 install_snell_protocol
+                ;;
+            vlessws)
+                install_vlessws_protocol
                 ;;
         esac
     done
@@ -2346,7 +2751,7 @@ uninstall_sing_box() {
 }
 
 has_any_protocol_fragment() {
-    [ -f "${REALITY_FRAGMENT_FILE}" ] || [ -f "${HY2_FRAGMENT_FILE}" ] || [ -f "${SHADOWTLS_FRAGMENT_FILE}" ] || [ -f "${SNELL_FRAGMENT_FILE}" ]
+    [ -f "${REALITY_FRAGMENT_FILE}" ] || [ -f "${HY2_FRAGMENT_FILE}" ] || [ -f "${SHADOWTLS_FRAGMENT_FILE}" ] || [ -f "${SNELL_FRAGMENT_FILE}" ] || [ -f "${VLESSWS_FRAGMENT_FILE}" ]
 }
 
 remove_single_protocol() {
@@ -2374,6 +2779,9 @@ remove_single_protocol() {
             ;;
         snell)
             rm -f "${SNELL_FRAGMENT_FILE}" "${SNELL_CLIENT_FILE}" "${SNELL_STATE_FILE}"
+            ;;
+        vlessws)
+            rm -f "${VLESSWS_FRAGMENT_FILE}" "${VLESSWS_CLIENT_FILE}" "${VLESSWS_STATE_FILE}"
             ;;
     esac
 
@@ -2541,6 +2949,7 @@ show_client_summary() {
         show_protocol_client_summary "Hysteria2" "${HY2_CLIENT_FILE}" "hysteria2://"
         show_protocol_client_summary "ShadowTLS + Shadowsocks" "${SHADOWTLS_CLIENT_FILE}" "ss://"
         show_protocol_client_summary "Snell v6" "${SNELL_CLIENT_FILE}" "snell://"
+        show_protocol_client_summary "VLESS WS TLS" "${VLESSWS_CLIENT_FILE}" "vless://"
     else
         echo -e "${YELLOW}配置文件不存在: ${CLIENT_CONFIG_FILE}${RESET}" >&2
     fi
@@ -3226,7 +3635,7 @@ build_state_panel_cache() {
         service_text="${YELLOW}未运行${RESET}"
     fi
 
-    protocol_text="Reality $(protocol_status_text reality) | HY2 $(protocol_status_text hy2) | ShadowTLS $(protocol_status_text shadowtls) | Snell $(protocol_status_text snell)"
+    protocol_text="Reality $(protocol_status_text reality) | HY2 $(protocol_status_text hy2) | ShadowTLS $(protocol_status_text shadowtls) | Snell $(protocol_status_text snell) | VLESSWS $(protocol_status_text vlessws)"
     upstream_text="$(upstream_outbound_status_text)"
     log_text="$(log_status_text)"
     firewall_text="$(firewall_backend_label)"
@@ -3420,6 +3829,7 @@ show_menu() {
         menu_add_auto "仅安装 Hysteria2" "只部署 HY2，可在安装流程中选择是否启用 UDP 端口跳跃。" "install_hy2"
         menu_add_auto "仅安装 ShadowTLS" "只部署 ShadowTLS + Shadowsocks，兼容已有 ShadowTLS 客户端配置。" "install_shadowtls"
         menu_add_auto "仅安装 Snell v6" "只部署 Snell v6，轻量加密 + 流量整形，需要 sing-box 1.14+ 与支持 v6 的客户端。" "install_snell"
+        menu_add_auto "仅安装 VLESS WS TLS" "只部署 VLESS + WS + TLS，需要自有域名并由 sing-box 内置 ACME 签发证书，要求核心 1.14+。" "install_vlessws"
         menu_add "0" "退出程序" "不执行任何操作，直接退出。" "exit"
         interactive_select "请选择安装方案:"
     else
@@ -3437,6 +3847,9 @@ show_menu() {
             if ! has_protocol snell; then
                 menu_add_auto "安装 Snell v6" "新增 Snell v6 协议；核心低于 1.14 时会先升级 sing-box。" "install_snell"
             fi
+            if ! has_protocol vlessws; then
+                menu_add_auto "安装 VLESS WS TLS" "新增 VLESS + WS + TLS 协议；需要自有域名，并由 sing-box 内置 ACME 签发证书。" "install_vlessws"
+            fi
         fi
 
         menu_add_auto "查看节点链接配置" "默认进入简洁摘要；完整 Clash / Sing-box / Sub-Store 配置可在二级菜单打开。" "view_config"
@@ -3450,7 +3863,7 @@ show_menu() {
         menu_add_auto "查看 sing-box 状态" "调用系统服务管理器查看 sing-box 当前运行状态。" "status"
         menu_add_auto "查看 sing-box 日志" "实时跟踪 sing-box 日志，按 Ctrl+C 退出日志查看。" "logs"
         menu_add_auto "日志开关 / 清理" "开启或关闭 sing-box 日志；关闭时会清理历史日志，降低连接者 IP 暴露风险。" "logging"
-        menu_add_auto "修改端口 / HY2 端口跳跃" "修改 Reality、HY2、ShadowTLS、Snell 端口，或重新配置 HY2 端口跳跃。" "change_ports"
+        menu_add_auto "修改端口 / HY2 端口跳跃" "修改 Reality、HY2、ShadowTLS、Snell、VLESS WS TLS 端口，或重新配置 HY2 端口跳跃。" "change_ports"
         menu_add_auto "防火墙检测 / 自动放行" "检测防火墙后端，或手动放行当前协议端口；安装和改端口不会自动修改防火墙。" "firewall"
         menu_add_auto "删除指定协议" "选择并删除某个协议；如果没有剩余协议，会询问是否同时卸载。" "remove_protocol"
         menu_add_auto "完全卸载 sing-box" "停止服务并删除 sing-box、配置目录、日志和 HY2 端口跳跃规则。" "uninstall"
@@ -3470,6 +3883,7 @@ change_ports_menu() {
     menu_add "2" "Hysteria2 端口 / SNI / 端口跳跃" "修改 HY2 UDP 监听端口、TLS SNI，或开启、关闭、调整端口跳跃范围。"
     menu_add "3" "ShadowTLS 端口 / 伪装域名" "修改 ShadowTLS 外层端口、Shadowsocks 内层端口或 ShadowTLS 伪装域名。"
     menu_add "4" "Snell 端口" "修改 Snell 入站监听端口，并同步更新客户端信息。"
+    menu_add "5" "VLESS WS TLS 端口" "修改 VLESS WS TLS 入站监听端口；域名与 WS 路径如需变更请删除后重装。"
     menu_add "0" "返回主菜单" "不修改端口，回到主菜单。"
     interactive_select "请选择要修改的协议:"
     change_choice="${MENU_CHOICE}"
@@ -3480,6 +3894,7 @@ change_ports_menu() {
         2) change_hy2_port ;;
         3) change_shadowtls_port ;;
         4) change_snell_port ;;
+        5) change_vlessws_port ;;
         0)
             SKIP_PAUSE=1
             return
@@ -3496,7 +3911,8 @@ remove_protocols_menu() {
     menu_add "2" "删除 Hysteria2" "删除 HY2 配置、证书、客户端信息，并清理端口跳跃规则。"
     menu_add "3" "删除 ShadowTLS" "删除 ShadowTLS + Shadowsocks 入站片段和客户端信息。"
     menu_add "4" "删除 Snell" "删除 Snell 入站片段和客户端信息。"
-    menu_add "5" "删除全部协议" "删除 Reality、HY2、ShadowTLS、Snell；若无剩余协议，会继续询问是否卸载核心。"
+    menu_add "5" "删除 VLESS WS TLS" "删除 VLESS WS TLS 入站片段、客户端信息和状态文件。"
+    menu_add "6" "删除全部协议" "删除 Reality、HY2、ShadowTLS、Snell、VLESS WS TLS；若无剩余协议，会继续询问是否卸载核心。"
     menu_add "0" "返回主菜单" "不删除任何协议，回到主菜单。"
     interactive_select "请选择要删除的协议:"
     remove_choice="${MENU_CHOICE}"
@@ -3507,7 +3923,8 @@ remove_protocols_menu() {
         2) remove_protocols hy2 ;;
         3) remove_protocols shadowtls ;;
         4) remove_protocols snell ;;
-        5) remove_protocols reality hy2 shadowtls snell ;;
+        5) remove_protocols vlessws ;;
+        6) remove_protocols reality hy2 shadowtls snell vlessws ;;
         0)
             SKIP_PAUSE=1
             return
@@ -3520,7 +3937,7 @@ firewall_menu() {
     while true; do
         menu_reset
         menu_add "1" "检测当前防火墙状态" "读取当前防火墙后端、脚本管理记录，并逐项检查已配置协议端口是否放行。"
-        menu_add "2" "自动放行当前协议端口" "按当前 Reality / HY2 / ShadowTLS / Snell 配置放行端口；若 HY2 启用端口跳跃，也会应用跳跃重定向规则。"
+        menu_add "2" "自动放行当前协议端口" "按当前 Reality / HY2 / ShadowTLS / Snell / VLESS WS TLS 配置放行端口；若 HY2 启用端口跳跃，也会应用跳跃重定向规则。"
         menu_add "3" "复原脚本管理的防火墙规则" "删除本脚本自动放行的端口规则，并移除 HY2 端口跳跃重定向服务。"
         menu_add "0" "返回主菜单" "不修改防火墙，回到主菜单。"
         interactive_select "请选择防火墙操作:"
@@ -3552,7 +3969,7 @@ run_if_installed() {
     if [ "${SING_BOX_INSTALLED}" -eq 0 ]; then
         "$@"
     else
-        echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}" >&2
+        echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-6 完成安装。${RESET}" >&2
     fi
 }
 
@@ -3587,6 +4004,9 @@ while true; do
             ;;
         install_snell)
             install_protocols snell
+            ;;
+        install_vlessws)
+            install_protocols vlessws
             ;;
         view_config)
             run_if_installed client_config_menu
