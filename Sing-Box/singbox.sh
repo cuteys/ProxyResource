@@ -1682,8 +1682,8 @@ install_reality_protocol() {
 
     listen_port=$(get_valid_port "请输入 VLESS 监听端口 (默认随机，回车确认): ")
 
-    read -p "请输入伪装域名 SNI (默认: www.gutenberg.org): " sni
-    sni=${sni:-www.gutenberg.org}
+    read -p "请输入伪装域名 SNI (默认: www.postgresql.org): " sni
+    sni=${sni:-www.postgresql.org}
 
     echo -e "${CYAN}正在生成 UUID...${RESET}"
     uuid=$(sing-box generate uuid)
@@ -1824,8 +1824,8 @@ install_shadowtls_protocol() {
     sport=$(get_valid_port "请输入 ShadowTLS 监听端口 (默认随机，回车确认): ")
     ssport=$(get_valid_port "请输入 Shadowsocks 监听端口 (默认随机，回车确认): ")
 
-    read -p "请输入 ShadowTLS 伪装域名 SNI (默认: www.gutenberg.org): " shadowtls_sni
-    shadowtls_sni=${shadowtls_sni:-www.gutenberg.org}
+    read -p "请输入 ShadowTLS 伪装域名 SNI (默认: www.postgresql.org): " shadowtls_sni
+    shadowtls_sni=${shadowtls_sni:-www.postgresql.org}
 
     ss_password=$(sing-box generate rand 16 --base64)
     password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
@@ -2221,8 +2221,8 @@ install_hy2_protocol() {
     hy2_up_mbps=$(get_valid_mbps "请输入 HY2 上行带宽 Mbps (默认 1000): " 1000)
     hy2_down_mbps=$(get_valid_mbps "请输入 HY2 下行带宽 Mbps (默认 1000): " 1000)
 
-    read -p "请输入 HY2 TLS SNI (默认: www.gutenberg.org): " hy2_sni
-    hy2_sni=${hy2_sni:-www.gutenberg.org}
+    read -p "请输入 HY2 TLS SNI (默认: www.postgresql.org): " hy2_sni
+    hy2_sni=${hy2_sni:-www.postgresql.org}
 
     read -p "是否启用 HY2 端口跳跃? (y/N): " enable_hop
     case "${enable_hop}" in
@@ -2790,7 +2790,7 @@ change_reality_port() {
     fi
 
     current_sni=$(awk -F\" '/"server_name"[[:space:]]*:/ { print $4; exit }' "${REALITY_FRAGMENT_FILE}")
-    current_sni=${current_sni:-www.gutenberg.org}
+    current_sni=${current_sni:-www.postgresql.org}
 
     menu_reset
     menu_add "1" "更改 Reality 监听端口" "当前 Reality 端口: ${current_port}。只修改入站监听端口。"
@@ -2965,7 +2965,7 @@ change_shadowtls_port() {
     current_ssport=$1
     current_sport=$2
     current_sni=$(awk -F\" '/"server"[[:space:]]*:/ { print $4; exit }' "${SHADOWTLS_FRAGMENT_FILE}")
-    current_sni=${current_sni:-www.gutenberg.org}
+    current_sni=${current_sni:-www.postgresql.org}
 
     if [ -z "${current_ssport}" ] || [ -z "${current_sport}" ]; then
         echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}"
@@ -3111,7 +3111,7 @@ change_hy2_port() {
     check_ss_command
 
     old_port=${hy2_port}
-    old_sni=${hy2_sni:-www.gutenberg.org}
+    old_sni=${hy2_sni:-www.postgresql.org}
     hy2_sni=${old_sni}
     old_hop_enabled=${hy2_hop_enabled}
     old_hop_range=${hy2_hop_range}
