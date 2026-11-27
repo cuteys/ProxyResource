@@ -31,6 +31,8 @@ SNELL_CLIENT_FILE="${CLIENT_DIR}/snell.txt"
 VLESSWS_FRAGMENT_FILE="${PROTOCOL_DIR}/vlessws.json"
 VLESSWS_STATE_FILE="${PROTOCOL_DIR}/vlessws.env"
 VLESSWS_CLIENT_FILE="${CLIENT_DIR}/vlessws.txt"
+VLESSWS_CERT_RESCUE_DIR="/var/lib/sing-box-certs-rescue"
+VLESSWS_CERT_RESCUE_LIST="${VLESSWS_CERT_RESCUE_DIR}/protected-paths.list"
 HY2_CERT_FILE="${CERT_DIR}/hy2.crt"
 HY2_KEY_FILE="${CERT_DIR}/hy2.key"
 HY2_PORT_HOP_FILE="${CONFIG_DIR}/hy2-port-hop.sh"
@@ -599,8 +601,9 @@ has_protocol() {
     [ -f "${fragment_file}" ] || config_has_protocol "$1"
 }
 
+# 一键补齐口径只看四个基础协议避免 VLESS WS TLS 缺失导致补齐项空转
 has_all_protocols() {
-    has_protocol reality && has_protocol hy2 && has_protocol shadowtls && has_protocol snell && has_protocol vlessws
+    has_protocol reality && has_protocol hy2 && has_protocol shadowtls && has_protocol snell
 }
 
 extract_fragment_listen_port() {
@@ -621,6 +624,14 @@ extract_inbounds_to_fragment() {
     local protocol=$1
     local output_file=$2
     local tmp_file="${output_file}.tmp"
+
+    # 导入 vlessws 片段前校验核心版本旧核心无法解析新式证书写法时跳过导入
+    if [ "${protocol}" = "vlessws" ] && is_sing_box_installed; then
+        if [ -z "$(get_sing_box_version)" ] || ! is_version_at_least "$(get_sing_box_version)" "1.14.0"; then
+            echo -e "${YELLOW}当前 sing-box 核心低于 1.14.0，跳过导入 VLESS WS TLS 片段以避免写入不兼容配置${RESET}" >&2
+            return 1
+        fi
+    fi
 
     if ! awk -v protocol="${protocol}" '
         function count_char(text, char,    i, total) {
@@ -701,8 +712,15 @@ extract_inbounds_to_fragment() {
 
     mv "${tmp_file}" "${output_file}"
 
-    # 导入片段若缺证书提供者引用则补齐，避免旧配置还原后入站无证书
-    if [ "${protocol}" = "vlessws" ] && ! grep -q '"certificate_provider"' "${output_file}"; then
+    # 导入的 vlessws 片段缺 server_name 或为空串时拒绝导入避免还原出无域名的坏配置
+    if [ "${protocol}" = "vlessws" ] && ! grep -Eq '"server_name"[[:space:]]*:[[:space:]]*"[^"]' "${output_file}"; then
+        rm -f "${output_file}"
+        echo -e "${RED}导入的 VLESS WS TLS 片段缺少或含空 server_name，已拒绝导入${RESET}" >&2
+        return 1
+    fi
+
+    # 导入规范化幂等按模式收敛自备证书片段原样保留仅 acme 片段缺引用时补齐
+    if [ "${protocol}" = "vlessws" ] && ! grep -q '"certificate_path"' "${output_file}" && ! grep -q '"certificate_provider"' "${output_file}"; then
         awk '
             {
                 if (!in_tls) {
@@ -808,17 +826,35 @@ import_existing_protocols() {
         fragment_file=$(protocol_fragment_file "${protocol}")
         if config_has_protocol "${protocol}" && [ ! -f "${fragment_file}" ]; then
             echo -e "${CYAN}检测到现有 $(protocol_label "${protocol}") 配置，正在导入以便合并管理...${RESET}"
-            extract_inbounds_to_fragment "${protocol}" "${fragment_file}"
+            if ! extract_inbounds_to_fragment "${protocol}" "${fragment_file}"; then
+                echo -e "${YELLOW}已跳过导入 $(protocol_label "${protocol}") 配置${RESET}" >&2
+            fi
         fi
     done
 
     import_existing_clients
 }
 
+# 统一判定 vlessws 证书模式优先状态文件次之嗅探片段内容
+vlessws_effective_cert_mode() {
+    local mode=""
+
+    if load_vlessws_state >/dev/null 2>&1; then
+        mode=${vlessws_cert_mode:-acme}
+    elif [ -f "${VLESSWS_FRAGMENT_FILE}" ] && grep -q '"certificate_path"' "${VLESSWS_FRAGMENT_FILE}"; then
+        mode="custom"
+    fi
+
+    [ -n "${mode}" ] || mode="acme"
+    echo "${mode}"
+}
+
 # 证书签发数据固定落在状态目录 acme 子目录以支持续期持久化
 render_certificate_providers() {
-    local domain
+    local domain mode
+    local vlessws_cert_mode vlessws_cert_path vlessws_key_path
 
+    vlessws_cert_mode="" vlessws_cert_path="" vlessws_key_path=""
     domain=""
     if load_vlessws_state >/dev/null 2>&1; then
         domain="${vlessws_domain}"
@@ -829,12 +865,17 @@ render_certificate_providers() {
 
     [ -n "${domain}" ] || return 0
 
+    # 自备证书模式顶层不渲染 certificate_providers 以保持配置纯净
+    if [ "$(vlessws_effective_cert_mode)" = "custom" ]; then
+        return 0
+    fi
+
     cat << EOF
   "certificate_providers": [
     {
       "type": "acme",
       "tag": "vlessws-cert",
-      "domain": ["${domain}"],
+      "domain": ["$(json_escape "${domain}")"],
       "data_directory": "${CONFIG_DIR}/acme"
     }
   ],
@@ -1604,6 +1645,10 @@ apply_current_firewall_rules() {
     if [ -f "${VLESSWS_FRAGMENT_FILE}" ]; then
         vlessws_port=$(extract_fragment_listen_port "${VLESSWS_FRAGMENT_FILE}")
         [ -n "${vlessws_port}" ] && add_firewall_rule_once "${backend}" "tcp" "${vlessws_port}" "VLESS WS TLS"
+        # ACME HTTP-01 校验依赖 80 端口自备证书模式不放行
+        if [ "$(vlessws_effective_cert_mode)" = "acme" ]; then
+            add_firewall_rule_once "${backend}" "tcp" "80" "VLESS WS TLS ACME"
+        fi
     fi
 
     if [ ! -s "${FIREWALL_STATE_FILE}" ]; then
@@ -1667,6 +1712,10 @@ show_firewall_status() {
     if [ -f "${VLESSWS_FRAGMENT_FILE}" ]; then
         vlessws_port=$(extract_fragment_listen_port "${VLESSWS_FRAGMENT_FILE}")
         print_firewall_port_status "${backend}" "VLESS WS TLS" "tcp" "${vlessws_port}"
+        # ACME 模式额外展示 80 端口放行状态与放行口径一致
+        if [ "$(vlessws_effective_cert_mode)" = "acme" ]; then
+            print_firewall_port_status "${backend}" "VLESS WS TLS ACME" "tcp" "80"
+        fi
         printed_ports=1
     fi
 
@@ -2402,14 +2451,14 @@ find_vlessws_port_conflict() {
     return 1
 }
 
-# 默认 443 并叠加占用与协议冲突检查以复用统一端口口径
+# 回车即随机选端口并对齐四协议占用与冲突校验口径
 get_vlessws_listen_port() {
     local prompt=$1
     local port conflict
 
     while true; do
         read -r -p "${prompt}" port
-        port=${port:-443}
+        port=${port:-$((RANDOM % 50000 + 10000))}
 
         if ! is_valid_port "${port}"; then
             echo -e "${RED}请输入一个有效的端口号（1-65535）${RESET}" >&2
@@ -2427,9 +2476,28 @@ get_vlessws_listen_port() {
             continue
         fi
 
+        if ! vlessws_warn_cdn_port "${port}"; then
+            continue
+        fi
+
         echo "${port}"
         return
     done
+}
+
+# 端口不在 Cloudflare HTTPS 代理白名单时提醒按 CDN 语境确认后继续
+vlessws_warn_cdn_port() {
+    local port=$1
+
+    case "${port}" in
+        443|8443|2053|2083|2087|2096)
+            return 0
+            ;;
+    esac
+
+    echo -e "${YELLOW}警告：端口 ${port} 不在 Cloudflare HTTPS 代理白名单（443、8443、2053、2083、2087、2096）内，CF 不会代理该端口${RESET}" >&2
+    echo -e "${YELLOW}可在 Cloudflare 用 Origin Rules 做端口改写，或改用白名单端口${RESET}" >&2
+    confirm_yes_default "${YELLOW}" "是否确认继续?"
 }
 
 # 低于 1.14.0 的核心无法解析新式 certificate_providers 写法时直接拒装
@@ -2455,16 +2523,154 @@ prompt_vlessws_domain() {
     local domain resolved_ip
 
     set_current_host_info
-    domain=$(get_required_value "请输入 VLESS WS TLS 绑定域名: ")
+    while true; do
+        domain=$(get_required_value "请输入 VLESS WS TLS 绑定域名: ")
+        # 域名进入 JSON 与分享链接仅限合法字符防止畸形输入破坏配置
+        if [[ "${domain}" =~ ^[A-Za-z0-9.-]+$ ]]; then
+            break
+        fi
+        echo -e "${RED}域名仅限字母数字点与横线，请重新输入${RESET}" >&2
+    done
     resolved_ip=$(getent hosts "${domain}" 2>/dev/null | awk '{print $1; exit}')
 
     if [ -z "${resolved_ip}" ]; then
         echo -e "${YELLOW}警告：域名 ${domain} 当前未解析出 IP，可继续，但 ACME 签发可能失败${RESET}" >&2
     elif [ "${HOST_IP}" != "YOUR_SERVER_IP" ] && [ "${resolved_ip}" != "${HOST_IP}" ]; then
-        echo -e "${YELLOW}警告：域名 ${domain} 解析到 ${resolved_ip}，与本机出口 IP ${HOST_IP} 不一致，可能解析尚未生效${RESET}" >&2
+        echo -e "${YELLOW}警告：域名 ${domain} 解析到 ${resolved_ip}，与本机出口 IP ${HOST_IP} 不一致，可能解析尚未生效或已套 CDN${RESET}" >&2
+        echo -e "${YELLOW}若已套 CDN 请按 CDN 语境处理：确认端口在代理白名单内，并按证书类型核对 CF SSL 模式${RESET}" >&2
     fi
 
     echo "${domain}"
+}
+
+# 提取证书公钥哈希用于与私钥比对
+vlessws_cert_pubkey_hash() {
+    local pem
+
+    pem=$(openssl x509 -noout -pubkey -in "$1" 2>/dev/null)
+    if [ -z "${pem}" ]; then
+        return 1
+    fi
+    printf '%s\n' "${pem}" | openssl dgst -sha256 2>/dev/null | awk '{print $NF}'
+}
+
+# 提取私钥公钥哈希用于与证书比对
+vlessws_key_pubkey_hash() {
+    local pem
+
+    # passin 传空口令遇加密私钥立即失败避免交互挂起
+    pem=$(openssl pkey -in "$1" -pubout -passin pass: 2>/dev/null)
+    if [ -z "${pem}" ]; then
+        return 1
+    fi
+    printf '%s\n' "${pem}" | openssl dgst -sha256 2>/dev/null | awk '{print $NF}'
+}
+
+# 判断 SAN 列表是否覆盖绑定域名支持通配符匹配
+vlessws_san_covers_domain() {
+    local san_text=$1
+    local domain=$2
+    local entry domain_lc entry_lc
+
+    domain_lc=${domain,,}
+
+    while IFS= read -r entry; do
+        [ -n "${entry}" ] || continue
+        entry_lc=${entry,,}
+        if [ "${entry_lc}" = "${domain_lc}" ]; then
+            return 0
+        fi
+        case "${entry_lc}" in
+            \*.*)
+                case "${domain_lc}" in
+                    *.${entry_lc#\*.}) return 0 ;;
+                esac
+                ;;
+        esac
+    done << EOF
+$(printf '%s\n' "${san_text}" | grep -o 'DNS:[^,]*' | sed 's/^DNS://')
+EOF
+
+    return 1
+}
+
+# 每次安装都询问证书来源并按自备流程完成存在可读与匹配校验
+prompt_vlessws_cert_source() {
+    local choice cert_file key_file cert_hash key_hash
+
+    echo -e "${CYAN}请选择 VLESS WS TLS 证书来源${RESET}"
+    echo -e "${GRAY}1. ACME 自动签发${RESET}"
+    echo -e "${GRAY}2. 自备证书文件${RESET}"
+    read -r -p "请选择 (默认 1，回车即可): " choice
+
+    if [ "${choice}" != "2" ]; then
+        vlessws_cert_mode="acme"
+        vlessws_cert_path=""
+        vlessws_key_path=""
+        return 0
+    fi
+
+    vlessws_cert_mode="custom"
+
+    while true; do
+        cert_file=$(get_required_value "请输入证书文件路径: ")
+        if [[ "${cert_file}" = /* ]] && [ -f "${cert_file}" ] && [ -r "${cert_file}" ]; then
+            break
+        fi
+        echo -e "${RED}证书文件不存在不可读或不是绝对路径，请输入绝对路径后重试${RESET}" >&2
+    done
+
+    while true; do
+        key_file=$(get_required_value "请输入私钥文件路径: ")
+        if [[ "${key_file}" = /* ]] && [ -f "${key_file}" ] && [ -r "${key_file}" ]; then
+            break
+        fi
+        echo -e "${RED}私钥文件不存在不可读或不是绝对路径，请输入绝对路径后重试${RESET}" >&2
+    done
+
+    # 状态文件只登记规范化后的绝对路径防止相对路径与符号链接绕过迁出保护
+    cert_file=$(readlink -f "${cert_file}" 2>/dev/null)
+    key_file=$(readlink -f "${key_file}" 2>/dev/null)
+    if [ -z "${cert_file}" ] || [ -z "${key_file}" ]; then
+        echo -e "${RED}无法规范化证书或私钥路径，已放弃安装${RESET}" >&2
+        return 1
+    fi
+
+    install_package_if_missing openssl openssl
+
+    cert_hash=$(vlessws_cert_pubkey_hash "${cert_file}")
+    key_hash=$(vlessws_key_pubkey_hash "${key_file}")
+    if [ -z "${cert_hash}" ] || [ -z "${key_hash}" ]; then
+        echo -e "${RED}无法读取证书或私钥的公钥信息，请确认文件为 PEM 格式后重试${RESET}" >&2
+        return 1
+    fi
+    if [ "${cert_hash}" != "${key_hash}" ]; then
+        echo -e "${RED}证书与私钥公钥不匹配，已拒绝安装${RESET}" >&2
+        return 1
+    fi
+
+    # SAN 与绑定域名不一致仅软警告不阻断安装
+    if ! vlessws_san_covers_domain "$(openssl x509 -noout -ext subjectAltName -in "${cert_file}" 2>/dev/null)" "${vlessws_domain}"; then
+        echo -e "${YELLOW}警告：证书 SAN 未覆盖域名 ${vlessws_domain}，客户端可能出现证书域名校验告警，可继续安装${RESET}" >&2
+    fi
+
+    vlessws_cert_path="${cert_file}"
+    vlessws_key_path="${key_file}"
+}
+
+# 优先用核心生成随机 WS 路径核心命令失败时用 urandom 兜底
+generate_vlessws_ws_path() {
+    local rand_part
+
+    rand_part=""
+    if is_sing_box_installed; then
+        rand_part=$(sing-box generate rand 16 --hex 2>/dev/null)
+    fi
+    if ! [[ "${rand_part}" =~ ^[A-Za-z0-9]{16,64}$ ]]; then
+        rand_part=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+    fi
+
+    echo "/${rand_part}"
 }
 
 write_vlessws_state() {
@@ -2473,6 +2679,9 @@ vlessws_port='${vlessws_port}'
 vlessws_uuid='${vlessws_uuid}'
 vlessws_domain='$(shell_single_quote_escape "${vlessws_domain}")'
 vlessws_path='$(shell_single_quote_escape "${vlessws_path}")'
+vlessws_cert_mode='${vlessws_cert_mode:-acme}'
+vlessws_cert_path='$(shell_single_quote_escape "${vlessws_cert_path:-}")'
+vlessws_key_path='$(shell_single_quote_escape "${vlessws_key_path:-}")'
 EOF
 }
 
@@ -2484,9 +2693,48 @@ load_vlessws_state() {
 
     # shellcheck disable=SC1090
     . "${VLESSWS_STATE_FILE}"
+
+    # 旧状态文件缺新键时兜底为 ACME 模式避免渲染与防火墙误判
+    vlessws_cert_mode=${vlessws_cert_mode:-acme}
+    vlessws_cert_path=${vlessws_cert_path:-}
+    vlessws_key_path=${vlessws_key_path:-}
+}
+
+# 自定义证书位于配置目录内时登记迁出保护清单登记前规范化路径防止绕过前缀匹配
+vlessws_record_cert_rescue() {
+    local rescue_kind=$1 rescue_path=$2 rescue_real=""
+
+    [ "${vlessws_cert_mode:-acme}" = "custom" ] || return 0
+    [ -n "${rescue_path}" ] || return 0
+    # 相对路径先按配置目录补全为绝对路径避免前缀匹配扑空
+    if [[ "${rescue_path}" != /* ]] && [ -f "${CONFIG_DIR}/${rescue_path}" ]; then
+        rescue_path="${CONFIG_DIR}/${rescue_path}"
+    fi
+    [ -f "${rescue_path}" ] || return 0
+    # 登记前用 readlink -f 规范化路径挡住 .. 与符号链接绕过保护前缀匹配
+    rescue_real=$(readlink -f "${rescue_path}" 2>/dev/null) || rescue_real=""
+    if [ -z "${rescue_real}" ] || [[ "${rescue_real}" != /* ]]; then
+        echo -e "${RED}自备证书路径 ${rescue_path} 无法规范化为绝对路径，已拒绝登记${RESET}" >&2
+        return 1
+    fi
+    [[ "${rescue_real}" == "${CONFIG_DIR}"/* ]] || return 0
+    mkdir -p "${VLESSWS_CERT_RESCUE_DIR}" || return 1
+    if [ -f "${VLESSWS_CERT_RESCUE_LIST}" ] && grep -Fxq "${rescue_kind}|${rescue_real}" "${VLESSWS_CERT_RESCUE_LIST}"; then
+        return 0
+    fi
+    echo "${rescue_kind}|${rescue_real}" >> "${VLESSWS_CERT_RESCUE_LIST}"
 }
 
 write_vlessws_fragment() {
+    local tls_cert_fields
+
+    if [ "${vlessws_cert_mode:-acme}" = "custom" ]; then
+        tls_cert_fields="        \"certificate_path\": \"$(json_escape "${vlessws_cert_path}")\",
+        \"key_path\": \"$(json_escape "${vlessws_key_path}")\""
+    else
+        tls_cert_fields='        "certificate_provider": "vlessws-cert"'
+    fi
+
     cat > "${VLESSWS_FRAGMENT_FILE}" << EOF
     {
       "type": "vless",
@@ -2510,7 +2758,7 @@ write_vlessws_fragment() {
       "tls": {
         "enabled": true,
         "server_name": "$(json_escape "${vlessws_domain}")",
-        "certificate_provider": "vlessws-cert"
+${tls_cert_fields}
       }
     }
 EOF
@@ -2525,7 +2773,13 @@ write_vlessws_client() {
         echo "UUID          : ${vlessws_uuid}"
         echo "WS 路径       : ${vlessws_path}"
         echo "加密方式      : none"
-        echo "TLS           : ACME 自动签发证书"
+        if [ "${vlessws_cert_mode:-acme}" = "custom" ]; then
+            echo "TLS           : 自备证书 (${vlessws_cert_path})"
+            echo "CF SSL 模式   : 公网 CA 证书配 Full strict，自签或 Origin CA 证书配 Full"
+        else
+            echo "TLS           : ACME 自动签发证书"
+            echo "CF SSL 模式   : Let's Encrypt 证书兼容 Full 与 Full strict"
+        fi
         echo "0-RTT         : 已启用 (max_early_data 2048)"
 
         echo -e "\n${CYAN}=============== 通用分享链接 ===============${RESET}"
@@ -2580,6 +2834,7 @@ EOF
 
 install_vlessws_protocol() {
     local vlessws_port vlessws_uuid vlessws_domain vlessws_path
+    local vlessws_cert_mode vlessws_cert_path vlessws_key_path
 
     if [ -f "${VLESSWS_FRAGMENT_FILE}" ]; then
         echo -e "${YELLOW}VLESS WS TLS 已存在，跳过安装${RESET}"
@@ -2588,10 +2843,18 @@ install_vlessws_protocol() {
 
     ensure_vlessws_capable_core || return 1
 
-    vlessws_domain=$(prompt_vlessws_domain)
-    vlessws_port=$(get_vlessws_listen_port "请输入 VLESS WS TLS 监听端口 (默认 443，回车确认): ")
+    set_current_host_info
 
-    if is_port_in_use 80; then
+    vlessws_domain=$(prompt_vlessws_domain)
+    vlessws_port=$(get_vlessws_listen_port "请输入 VLESS WS TLS 监听端口 (默认随机，回车即可): ")
+
+    prompt_vlessws_cert_source || {
+        echo -e "${YELLOW}已取消 VLESS WS TLS 安装${RESET}"
+        return 1
+    }
+
+    # 仅 ACME 模式依赖 80 端口完成 HTTP-01 校验自备证书无需占用
+    if [ "${vlessws_cert_mode}" = "acme" ] && is_port_in_use 80; then
         echo -e "${YELLOW}警告：端口 80 已被占用，ACME HTTP-01 校验无法完成，证书签发会失败${RESET}" >&2
         if ! confirm_yes_default "${YELLOW}" "是否继续安装? 如需自动签发证书请先腾出 80 端口"; then
             echo -e "${YELLOW}已取消 VLESS WS TLS 安装${RESET}"
@@ -2602,8 +2865,8 @@ install_vlessws_protocol() {
     echo -e "${CYAN}正在生成 UUID...${RESET}"
     vlessws_uuid=$(sing-box generate uuid)
 
-    read -r -p "请输入自定义 WS 路径 (默认: /${vlessws_uuid}，回车确认): " vlessws_path
-    vlessws_path=${vlessws_path:-/${vlessws_uuid}}
+    read -r -p "请输入自定义 WS 路径 (默认随机，回车即可): " vlessws_path
+    vlessws_path=${vlessws_path:-$(generate_vlessws_ws_path)}
     if [ "${vlessws_path#/}" = "${vlessws_path}" ]; then
         vlessws_path="/${vlessws_path}"
     fi
@@ -2622,6 +2885,7 @@ install_vlessws_protocol() {
 
 change_vlessws_port() {
     local current_port new_port tmp_file vlessws_port vlessws_uuid vlessws_domain vlessws_path
+    local vlessws_cert_mode vlessws_cert_path vlessws_key_path
 
     import_existing_protocols
 
@@ -2640,7 +2904,7 @@ change_vlessws_port() {
 
     load_vlessws_state || return
 
-    new_port=$(get_vlessws_listen_port "请输入新的 VLESS WS TLS 监听端口 (当前 ${current_port}，默认 443，回车确认): ")
+    new_port=$(get_vlessws_listen_port "请输入新的 VLESS WS TLS 监听端口 (当前 ${current_port}，默认随机，回车即可): ")
 
     if [ "${new_port}" = "${current_port}" ]; then
         echo -e "${YELLOW}配置未变化，已取消修改${RESET}"
@@ -2717,6 +2981,10 @@ install_protocols() {
 }
 
 perform_uninstall_sing_box() {
+    local vlessws_cert_mode vlessws_cert_path vlessws_key_path
+    local preserve_cert=0 preserve_key=0 preserve_dir=""
+    local rescue_entry rescue_kind rescue_path restore_failed=0
+
     echo -e "${CYAN}正在卸载 sing-box${RESET}"
     restore_managed_firewall_rules
 
@@ -2731,9 +2999,86 @@ perform_uninstall_sing_box() {
         systemctl daemon-reload
     fi
 
+    # 自备证书文件绝不删除先登记迁出保护清单备份成功才允许删除配置目录
+    if load_vlessws_state >/dev/null 2>&1 && [ "${vlessws_cert_mode:-acme}" = "custom" ]; then
+        if ! vlessws_record_cert_rescue cert "${vlessws_cert_path}" || ! vlessws_record_cert_rescue key "${vlessws_key_path}"; then
+            echo -e "${RED}自备证书迁出保护清单登记失败，已中止卸载且未删除任何文件${RESET}" >&2
+            return 1
+        fi
+    elif [ ! -f "${VLESSWS_STATE_FILE}" ] && [ -f "${VLESSWS_FRAGMENT_FILE}" ] && grep -q '"certificate_path"' "${VLESSWS_FRAGMENT_FILE}"; then
+        # 无状态文件时嗅探自备证书片段登记路径避免导入态直卸误删
+        vlessws_cert_mode="custom"
+        vlessws_cert_path=$(extract_json_string_field "certificate_path" "${VLESSWS_FRAGMENT_FILE}")
+        vlessws_key_path=$(extract_json_string_field "key_path" "${VLESSWS_FRAGMENT_FILE}")
+        if ! vlessws_record_cert_rescue cert "${vlessws_cert_path}" || ! vlessws_record_cert_rescue key "${vlessws_key_path}"; then
+            echo -e "${RED}自备证书迁出保护清单登记失败，已中止卸载且未删除任何文件${RESET}" >&2
+            return 1
+        fi
+    fi
+
+    if [ -f "${VLESSWS_CERT_RESCUE_LIST}" ]; then
+        while IFS= read -r rescue_entry || [ -n "${rescue_entry}" ]; do
+            rescue_kind=${rescue_entry%%|*}
+            rescue_path=${rescue_entry#*|}
+            if [ -n "${rescue_path}" ] && [ -f "${rescue_path}" ] && [[ "${rescue_path}" == "${CONFIG_DIR}"/* ]]; then
+                case "${rescue_kind}" in
+                    cert)
+                        preserve_cert=1
+                        vlessws_cert_path=${rescue_path}
+                        ;;
+                    key)
+                        preserve_key=1
+                        vlessws_key_path=${rescue_path}
+                        ;;
+                esac
+            fi
+        done < "${VLESSWS_CERT_RESCUE_LIST}"
+    fi
+
+    if [ "${preserve_cert}" -eq 0 ] && [ "${preserve_key}" -eq 0 ] && [ -f "${VLESSWS_CERT_RESCUE_LIST}" ]; then
+        rm -rf "${VLESSWS_CERT_RESCUE_DIR}"
+    fi
+
+    if [ "${preserve_cert}" -eq 1 ] || [ "${preserve_key}" -eq 1 ]; then
+        preserve_dir=${VLESSWS_CERT_RESCUE_DIR}
+        if [ "${preserve_cert}" -eq 1 ]; then
+            cp -p "${vlessws_cert_path}" "${preserve_dir}/cert" || {
+                echo -e "${RED}自备证书迁出备份失败，已中止卸载且未删除任何文件${RESET}" >&2
+                return 1
+            }
+        fi
+        if [ "${preserve_key}" -eq 1 ]; then
+            cp -p "${vlessws_key_path}" "${preserve_dir}/key" || {
+                echo -e "${RED}自备证书私钥迁出备份失败，已中止卸载且未删除任何文件${RESET}" >&2
+                return 1
+            }
+        fi
+    fi
+
     rm -rf "${CONFIG_DIR}"
     rm -f /var/log/sing-box.log*
     rm -f /etc/logrotate.d/sing-box
+
+    if [ "${preserve_cert}" -eq 1 ]; then
+        mkdir -p "$(dirname "${vlessws_cert_path}")"
+        if ! cp -p "${preserve_dir}/cert" "${vlessws_cert_path}"; then
+            echo -e "${RED}自备证书原位恢复失败，迁出副本保留在 ${preserve_dir}${RESET}" >&2
+            restore_failed=1
+        fi
+    fi
+    if [ "${preserve_key}" -eq 1 ]; then
+        mkdir -p "$(dirname "${vlessws_key_path}")"
+        if ! cp -p "${preserve_dir}/key" "${vlessws_key_path}"; then
+            echo -e "${RED}自备证书私钥原位恢复失败，迁出副本保留在 ${preserve_dir}${RESET}" >&2
+            restore_failed=1
+        fi
+    fi
+    if [ -n "${preserve_dir}" ] && [ "${restore_failed}" -eq 0 ]; then
+        rm -rf "${VLESSWS_CERT_RESCUE_DIR}"
+        echo -e "${GREEN}已保留自备证书文件未删除${RESET}"
+    elif [ -n "${preserve_dir}" ]; then
+        echo -e "${YELLOW}自备证书迁出副本保留在 ${preserve_dir}${RESET}"
+    fi
 
     if [ -f "/usr/local/bin/sing-box" ]; then
         rm /usr/local/bin/sing-box
@@ -2781,6 +3126,26 @@ remove_single_protocol() {
             rm -f "${SNELL_FRAGMENT_FILE}" "${SNELL_CLIENT_FILE}" "${SNELL_STATE_FILE}"
             ;;
         vlessws)
+            vlessws_cert_mode="" vlessws_cert_path="" vlessws_key_path=""
+            if load_vlessws_state >/dev/null 2>&1; then
+                :
+            elif [ -f "${VLESSWS_FRAGMENT_FILE}" ] && grep -q '"certificate_path"' "${VLESSWS_FRAGMENT_FILE}"; then
+                vlessws_cert_mode="custom"
+                vlessws_cert_path=$(extract_json_string_field "certificate_path" "${VLESSWS_FRAGMENT_FILE}")
+                vlessws_key_path=$(extract_json_string_field "key_path" "${VLESSWS_FRAGMENT_FILE}")
+            fi
+            rescue_record_failed=0
+            if [ "${vlessws_cert_mode:-acme}" = "custom" ]; then
+                vlessws_record_cert_rescue cert "${vlessws_cert_path}" || rescue_record_failed=1
+                vlessws_record_cert_rescue key "${vlessws_key_path}" || rescue_record_failed=1
+                if [ "${rescue_record_failed}" -eq 1 ]; then
+                    echo -e "${RED}登记自备证书迁出保护清单失败，已中止删除且未删除任何文件${RESET}" >&2
+                    return 1
+                fi
+            fi
+            if [ "$(vlessws_effective_cert_mode)" = "custom" ]; then
+                echo -e "${YELLOW}自备证书文件不受影响，仅清理脚本生成物${RESET}"
+            fi
             rm -f "${VLESSWS_FRAGMENT_FILE}" "${VLESSWS_CLIENT_FILE}" "${VLESSWS_STATE_FILE}"
             ;;
     esac
@@ -3829,27 +4194,27 @@ show_menu() {
         menu_add_auto "仅安装 Hysteria2" "只部署 HY2，可在安装流程中选择是否启用 UDP 端口跳跃。" "install_hy2"
         menu_add_auto "仅安装 ShadowTLS" "只部署 ShadowTLS + Shadowsocks，兼容已有 ShadowTLS 客户端配置。" "install_shadowtls"
         menu_add_auto "仅安装 Snell v6" "只部署 Snell v6，轻量加密 + 流量整形，需要 sing-box 1.14+ 与支持 v6 的客户端。" "install_snell"
-        menu_add_auto "仅安装 VLESS WS TLS" "只部署 VLESS + WS + TLS，需要自有域名并由 sing-box 内置 ACME 签发证书，要求核心 1.14+。" "install_vlessws"
+        menu_add_auto "仅安装 VLESS WS TLS" "只部署 VLESS + WS + TLS，需要自有域名，可选 ACME 自动签发或自备证书文件，要求核心 1.14+。" "install_vlessws"
         menu_add "0" "退出程序" "不执行任何操作，直接退出。" "exit"
         interactive_select "请选择安装方案:"
     else
         if ! has_all_protocols; then
             menu_add_auto "一键补齐缺失协议" "只安装当前缺失的协议；已存在的协议会自动跳过，不重复覆盖。" "install_all"
-            if ! has_protocol reality; then
-                menu_add_auto "安装 VLESS Reality" "新增 Reality 协议，适合稳定 TCP + Reality 伪装场景。" "install_reality"
-            fi
-            if ! has_protocol hy2; then
-                menu_add_auto "安装 Hysteria2" "新增 HY2 协议，并可选择配置 UDP 端口跳跃。" "install_hy2"
-            fi
-            if ! has_protocol shadowtls; then
-                menu_add_auto "安装 ShadowTLS" "新增 ShadowTLS + Shadowsocks 协议。" "install_shadowtls"
-            fi
-            if ! has_protocol snell; then
-                menu_add_auto "安装 Snell v6" "新增 Snell v6 协议；核心低于 1.14 时会先升级 sing-box。" "install_snell"
-            fi
-            if ! has_protocol vlessws; then
-                menu_add_auto "安装 VLESS WS TLS" "新增 VLESS + WS + TLS 协议；需要自有域名，并由 sing-box 内置 ACME 签发证书。" "install_vlessws"
-            fi
+        fi
+        if ! has_protocol reality; then
+            menu_add_auto "安装 VLESS Reality" "新增 Reality 协议，适合稳定 TCP + Reality 伪装场景。" "install_reality"
+        fi
+        if ! has_protocol hy2; then
+            menu_add_auto "安装 Hysteria2" "新增 HY2 协议，并可选择配置 UDP 端口跳跃。" "install_hy2"
+        fi
+        if ! has_protocol shadowtls; then
+            menu_add_auto "安装 ShadowTLS" "新增 ShadowTLS + Shadowsocks 协议。" "install_shadowtls"
+        fi
+        if ! has_protocol snell; then
+            menu_add_auto "安装 Snell v6" "新增 Snell v6 协议；核心低于 1.14 时会先升级 sing-box。" "install_snell"
+        fi
+        if ! has_protocol vlessws; then
+            menu_add_auto "安装 VLESS WS TLS" "新增 VLESS + WS + TLS 协议；需要自有域名，可选 ACME 自动签发或自备证书文件。" "install_vlessws"
         fi
 
         menu_add_auto "查看节点链接配置" "默认进入简洁摘要；完整 Clash / Sing-box / Sub-Store 配置可在二级菜单打开。" "view_config"
