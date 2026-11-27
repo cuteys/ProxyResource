@@ -3,7 +3,6 @@
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 GRAY='\033[0;90m'
@@ -47,48 +46,45 @@ fi
 
 check_root() {
     if [ "$(id -u)" != "0" ]; then
-        echo -e "${RED}请使用 root 权限执行此脚本！${RESET}"
+        echo -e "${RED}请使用 root 权限执行此脚本！${RESET}" >&2
         exit 1
     fi
 }
 
 is_sing_box_installed() {
-    if command -v sing-box &> /dev/null; then
-        return 0
-    else
-        return 1
-    fi
+    command -v sing-box >/dev/null 2>&1
 }
 
 is_sing_box_running() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
-        rc-service "${SERVICE_NAME}" status &> /dev/null
+    if [ "${IS_ALPINE}" -eq 1 ]; then
+        rc-service "${SERVICE_NAME}" status >/dev/null 2>&1
     else
         systemctl is-active --quiet "${SERVICE_NAME}"
     fi
-    return $?
 }
 
 check_time_sync() {
+    local sync_answer
+
     if [ "${IS_ALPINE}" -eq 1 ]; then
-        if ! command -v chronyd &> /dev/null && ! command -v ntpd &> /dev/null; then
-            echo -e "${YELLOW}提示：未检测到时间同步服务，Reality 对时间要求严格，建议安装 chrony 并保持运行${RESET}"
+        if ! command -v chronyd >/dev/null 2>&1 && ! command -v ntpd >/dev/null 2>&1; then
+            echo -e "${YELLOW}提示：未检测到时间同步服务，Reality 对时间要求严格，建议安装 chrony 并保持运行${RESET}" >&2
         fi
         return
     fi
-    if ! command -v timedatectl &> /dev/null; then
-        echo -e "${YELLOW}提示：未找到 timedatectl，请自行确认系统时间同步已开启${RESET}"
+    if ! command -v timedatectl >/dev/null 2>&1; then
+        echo -e "${YELLOW}提示：未找到 timedatectl，请自行确认系统时间同步已开启${RESET}" >&2
         return
     fi
     if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" != "yes" ]; then
-        echo -e "${YELLOW}警告：系统时间未与网络同步，Reality 握手与防探测都依赖准确时间${RESET}"
-        read -p "是否立即开启自动校时? (y/N): " sync_answer
+        echo -e "${YELLOW}警告：系统时间未与网络同步，Reality 握手与防探测都依赖准确时间${RESET}" >&2
+        read -r -p "是否立即开启自动校时? (y/N): " sync_answer
         case "${sync_answer}" in
             [yY]|[yY][eE][sS])
                 if timedatectl set-ntp true; then
                     echo -e "${GREEN}自动校时已开启${RESET}"
                 else
-                    echo -e "${RED}开启失败，请手动执行: timedatectl set-ntp true${RESET}"
+                    echo -e "${RED}开启失败，请手动执行: timedatectl set-ntp true${RESET}" >&2
                 fi
                 ;;
             *)
@@ -98,31 +94,44 @@ check_time_sync() {
     fi
 }
 
-check_ss_command() {
-    if ! command -v ss &> /dev/null; then
-        echo -e "${YELLOW}ss 命令未找到，正在尝试自动安装 iproute2 ${RESET}"
+# 统一各发行版包管理安装流程并在特权环境下省略提权前缀
+install_system_package() {
+    local debian_pkg=$1
+    local rhel_pkg=${2:-$1}
+    local alpine_update=${3:-0}
+    local manual_hint=${4:-$1}
 
-        if [ "$IS_ALPINE" -eq 1 ]; then
-            apk update && apk add iproute2
-        elif command -v apt-get &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y iproute2
-        elif command -v yum &> /dev/null; then
-            sudo yum install -y iproute
-        elif command -v dnf &> /dev/null; then
-            sudo dnf install -y iproute
-        elif command -v pacman &> /dev/null; then
-            sudo pacman -Sy --noconfirm iproute2
-        elif command -v zypper &> /dev/null; then
-            sudo zypper install -y iproute2
+    if [ "${IS_ALPINE}" -eq 1 ]; then
+        if [ "${alpine_update}" -eq 1 ]; then
+            apk update && apk add "${debian_pkg}"
         else
-            echo -e "${RED}无法检测到支持的包管理器，请手动安装 iproute2 包${RESET}"
-            exit 1
+            apk add "${debian_pkg}"
         fi
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update && apt-get install -y "${debian_pkg}"
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y "${rhel_pkg}"
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y "${rhel_pkg}"
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm "${debian_pkg}"
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper install -y "${debian_pkg}"
+    else
+        echo -e "${RED}无法检测到支持的包管理器，请手动安装 ${manual_hint}${RESET}" >&2
+        exit 1
+    fi
+}
 
-        if command -v ss &> /dev/null; then
+check_ss_command() {
+    if ! command -v ss >/dev/null 2>&1; then
+        echo -e "${YELLOW}ss 命令未找到，正在尝试自动安装 iproute2 ${RESET}"
+        install_system_package "iproute2" "iproute" 1 "iproute2 包"
+
+        if command -v ss >/dev/null 2>&1; then
             echo -e "${GREEN}iproute2 安装成功，ss 命令已可用${RESET}"
         else
-            echo -e "${RED}自动安装失败，请手动安装 iproute2 / iproute 包${RESET}"
+            echo -e "${RED}自动安装失败，请手动安装 iproute2 / iproute 包${RESET}" >&2
             exit 1
         fi
     else
@@ -132,24 +141,25 @@ check_ss_command() {
 
 is_port_in_use() {
     local port=$1
-    if ss -tuln | grep -q ":$port "; then
-        return 0
-    else
-        return 1
-    fi
+    ss -tuln | grep -q ":${port} "
+}
+
+is_valid_port() {
+    local port=$1
+    [[ "${port}" =~ ^[0-9]+$ ]] && [ "${port}" -ge 1 ] && [ "${port}" -le 65535 ]
 }
 
 get_valid_port() {
     local port
     while true; do
-        read -p "$1" port
+        read -r -p "$1" port
         port=${port:-$((RANDOM % 50000 + 10000))}
 
-        if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
-            if is_port_in_use "$port"; then
-                echo -e "${RED}端口 $port 已被占用，请选择其他端口。${RESET}" >&2
+        if is_valid_port "${port}"; then
+            if is_port_in_use "${port}"; then
+                echo -e "${RED}端口 ${port} 已被占用，请选择其他端口。${RESET}" >&2
             else
-                echo "$port"
+                echo "${port}"
                 return
             fi
         else
@@ -163,15 +173,30 @@ get_valid_target_port() {
     local port
 
     while true; do
-        read -p "${prompt}" port
+        read -r -p "${prompt}" port
 
-        if [[ "${port}" =~ ^[0-9]+$ ]] && [ "${port}" -ge 1 ] && [ "${port}" -le 65535 ]; then
+        if is_valid_port "${port}"; then
             echo "${port}"
             return
         fi
 
         echo -e "${RED}请输入有效端口号（1-65535）${RESET}" >&2
     done
+}
+
+# 用 printf -v 生成确认提示以避免子壳层开销
+confirm_yes_default() {
+    local color=$1
+    local message=$2
+    local prompt confirm
+
+    printf -v prompt '%b' "${color}${message} (Y/n) ${RESET}"
+    read -r -p "${prompt}" confirm
+    confirm=${confirm:-Y}
+    case "${confirm}" in
+        y|Y) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 get_required_value() {
@@ -226,20 +251,19 @@ json_string_value() {
     echo "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p"
 }
 
-geoip_country_code() {
-    echo "$1" | sed -n 's/.*"country"[[:space:]]*:[[:space:]]*{[^}]*"code"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
-}
+# 统一提取 GeoIP 嵌套对象中的字符串与整数值
+json_nested_value() {
+    local json=$1
+    local section=$2
+    local key=$3
+    local value_type=${4:-string}
+    local value_pattern='"\([^"]*\)"'
 
-geoip_country_name() {
-    echo "$1" | sed -n 's/.*"country"[[:space:]]*:[[:space:]]*{[^}]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
-}
+    if [ "${value_type}" = "number" ]; then
+        value_pattern='\([0-9][0-9]*\)'
+    fi
 
-geoip_as_number() {
-    echo "$1" | sed -n 's/.*"as"[[:space:]]*:[[:space:]]*{[^}]*"number"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p'
-}
-
-geoip_as_name() {
-    echo "$1" | sed -n 's/.*"as"[[:space:]]*:[[:space:]]*{[^}]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+    echo "${json}" | sed -n "s/.*\"${section}\"[[:space:]]*:[[:space:]]*{[^}]*\"${key}\"[[:space:]]*:[[:space:]]*${value_pattern}.*/\1/p"
 }
 
 geoip_is_success() {
@@ -249,7 +273,7 @@ geoip_is_success() {
 fetch_geoip_json() {
     local family=$1
 
-    if ! command -v curl &> /dev/null; then
+    if ! command -v curl >/dev/null 2>&1; then
         return 1
     fi
 
@@ -278,10 +302,10 @@ print_geoip_summary() {
 
     ip=$(json_string_value "${json}" "ip")
     addr=$(json_string_value "${json}" "addr")
-    country_name=$(geoip_country_name "${json}")
-    country_code=$(geoip_country_code "${json}")
-    as_number=$(geoip_as_number "${json}")
-    as_name=$(geoip_as_name "${json}")
+    country_name=$(json_nested_value "${json}" "country" "name")
+    country_code=$(json_nested_value "${json}" "country" "code")
+    as_number=$(json_nested_value "${json}" "as" "number" "number")
+    as_name=$(json_nested_value "${json}" "as" "name")
 
     echo -e "${label}: ${GREEN}${ip}${RESET}  ${country_name}(${country_code})  AS${as_number} ${as_name}"
     [ -n "${addr}" ] && echo -e "      网段: ${addr}"
@@ -293,6 +317,7 @@ show_startup_ip_info() {
     print_geoip_summary "IPv6" "${IPV6_GEOIP_JSON}"
 }
 
+# 跨函数共享的公网地址与国家代码采用大写全局命名
 set_current_host_info() {
     local json
 
@@ -302,15 +327,15 @@ set_current_host_info() {
         json="${IPV6_GEOIP_JSON}"
     fi
 
-    host_ip=$(json_string_value "${json}" "ip")
-    ip_country=$(geoip_country_code "${json}")
+    HOST_IP=$(json_string_value "${json}" "ip")
+    IP_COUNTRY=$(json_nested_value "${json}" "country" "code")
 
-    if [ -z "${host_ip}" ]; then
-        host_ip=$(curl -4 -s --max-time 5 http://checkip.amazonaws.com 2>/dev/null | tr -d '\r\n')
+    if [ -z "${HOST_IP}" ]; then
+        HOST_IP=$(curl -4 -s --max-time 5 http://checkip.amazonaws.com 2>/dev/null | tr -d '\r\n')
     fi
 
-    host_ip=${host_ip:-YOUR_SERVER_IP}
-    ip_country=${ip_country:-NODE}
+    HOST_IP=${HOST_IP:-YOUR_SERVER_IP}
+    IP_COUNTRY=${IP_COUNTRY:-NODE}
 }
 
 format_host_for_uri() {
@@ -341,6 +366,7 @@ upstream_type_label() {
     esac
 }
 
+# 保留状态文件键名小写以兼容已有环境持久化配置
 load_upstream_outbound() {
     [ -f "${UPSTREAM_OUTBOUND_FILE}" ] || return 1
 
@@ -353,8 +379,7 @@ load_upstream_outbound() {
 
     is_valid_upstream_type "${upstream_type}" || return 1
     [ -n "${upstream_server}" ] || return 1
-    [[ "${upstream_port}" =~ ^[0-9]+$ ]] || return 1
-    [ "${upstream_port}" -ge 1 ] && [ "${upstream_port}" -le 65535 ] || return 1
+    is_valid_port "${upstream_port}" || return 1
 }
 
 has_upstream_outbound() {
@@ -374,7 +399,7 @@ EOF
 }
 
 upstream_outbound_status_text() {
-    local auth_text
+    local auth_text upstream_type upstream_server upstream_port upstream_username upstream_password
 
     if [ -f "${UPSTREAM_OUTBOUND_FILE}" ]; then
         if load_upstream_outbound; then
@@ -385,7 +410,7 @@ upstream_outbound_status_text() {
             fi
             echo -e "${GREEN}$(upstream_type_label "${upstream_type}") -> ${upstream_server}:${upstream_port}${RESET}${GRAY}${auth_text}${RESET}"
         else
-            echo -e "${RED}配置无效，当前渲染时会回退 direct${RESET}"
+            echo -e "${RED}配置无效，当前渲染时会回退 direct${RESET}" >&2
         fi
     else
         echo -e "${YELLOW}未设置，默认直连 direct${RESET}"
@@ -405,23 +430,21 @@ render_upstream_outbound_json() {
     echo "      \"type\": \"${upstream_type}\","
     echo "      \"tag\": \"${UPSTREAM_OUTBOUND_TAG}\","
     echo "      \"server\": \"${escaped_server}\","
-    if [ "${upstream_type}" = "socks" ]; then
+    if [ "${upstream_type}" = "socks" ] || [ -n "${upstream_username}" ]; then
         echo "      \"server_port\": ${upstream_port},"
+    else
+        echo "      \"server_port\": ${upstream_port}"
+    fi
+    if [ "${upstream_type}" = "socks" ]; then
         if [ -n "${upstream_username}" ]; then
             echo "      \"version\": \"5\","
-            echo "      \"username\": \"${escaped_username}\","
-            echo "      \"password\": \"${escaped_password}\""
         else
             echo "      \"version\": \"5\""
         fi
-    else
-        if [ -n "${upstream_username}" ]; then
-            echo "      \"server_port\": ${upstream_port},"
-            echo "      \"username\": \"${escaped_username}\","
-            echo "      \"password\": \"${escaped_password}\""
-        else
-            echo "      \"server_port\": ${upstream_port}"
-        fi
+    fi
+    if [ -n "${upstream_username}" ]; then
+        echo "      \"username\": \"${escaped_username}\","
+        echo "      \"password\": \"${escaped_password}\""
     fi
     echo "    }"
 }
@@ -439,9 +462,11 @@ load_log_state() {
 }
 
 is_log_enabled() {
+    local log_enabled
+
     if load_log_state; then
         [ "${log_enabled}" = "true" ]
-        return $?
+        return
     fi
 
     return 0
@@ -470,7 +495,7 @@ cleanup_sing_box_logs() {
     rm -f /var/log/sing-box.log*
     rm -f /etc/logrotate.d/sing-box
 
-    if [ "$IS_ALPINE" -ne 1 ] && command -v journalctl >/dev/null 2>&1; then
+    if [ "${IS_ALPINE}" -ne 1 ] && command -v journalctl >/dev/null 2>&1; then
         case "${journal_mode}" in
             force)
                 journal_choice="y"
@@ -479,7 +504,7 @@ cleanup_sing_box_logs() {
                 journal_choice="n"
                 ;;
             *)
-                echo -e "${YELLOW}systemd journal 不支持只删除 sing-box 单个服务的历史日志。${RESET}"
+                echo -e "${YELLOW}systemd journal 不支持只删除 sing-box 单个服务的历史日志。${RESET}" >&2
                 read -r -p "是否清理已归档的 systemd journal? 这可能影响其它服务的历史日志 (y/N): " journal_choice
                 ;;
         esac
@@ -491,7 +516,7 @@ cleanup_sing_box_logs() {
                 echo -e "${GREEN}已清理已归档的 systemd journal${RESET}"
                 ;;
             *)
-                echo -e "${YELLOW}已跳过 systemd journal 清理；如需彻底清除，请手动处理 journal 历史。${RESET}"
+                echo -e "${YELLOW}已跳过 systemd journal 清理；如需彻底清除，请手动处理 journal 历史。${RESET}" >&2
                 ;;
         esac
     fi
@@ -500,7 +525,7 @@ cleanup_sing_box_logs() {
 }
 
 prompt_log_preference_if_unset() {
-    local choice
+    local choice log_enabled
 
     if [ -f "${LOG_STATE_FILE}" ]; then
         return
@@ -525,40 +550,65 @@ prompt_log_preference_if_unset() {
     esac
 }
 
-config_has_reality() {
-    [ -f "${CONFIG_FILE}" ] && grep -q '"tag"[[:space:]]*:[[:space:]]*"vless-reality"' "${CONFIG_FILE}"
+# 按协议名集中维护片段路径与标签以避免四份重复分支
+protocol_fragment_file() {
+    case "$1" in
+        reality) echo "${REALITY_FRAGMENT_FILE}" ;;
+        shadowtls) echo "${SHADOWTLS_FRAGMENT_FILE}" ;;
+        hy2) echo "${HY2_FRAGMENT_FILE}" ;;
+        snell) echo "${SNELL_FRAGMENT_FILE}" ;;
+        *) return 1 ;;
+    esac
 }
 
-config_has_shadowtls() {
-    [ -f "${CONFIG_FILE}" ] && grep -q '"type"[[:space:]]*:[[:space:]]*"shadowtls"' "${CONFIG_FILE}"
+protocol_label() {
+    case "$1" in
+        reality) echo "VLESS Reality" ;;
+        shadowtls) echo "ShadowTLS" ;;
+        hy2) echo "Hysteria2" ;;
+        snell) echo "Snell" ;;
+        *) echo "$1" ;;
+    esac
 }
 
-config_has_hy2() {
-    [ -f "${CONFIG_FILE}" ] && grep -q '"tag"[[:space:]]*:[[:space:]]*"hy2-in"' "${CONFIG_FILE}"
+config_has_protocol() {
+    local pattern
+
+    [ -f "${CONFIG_FILE}" ] || return 1
+    case "$1" in
+        reality) pattern='"tag"[[:space:]]*:[[:space:]]*"vless-reality"' ;;
+        shadowtls) pattern='"type"[[:space:]]*:[[:space:]]*"shadowtls"' ;;
+        hy2) pattern='"tag"[[:space:]]*:[[:space:]]*"hy2-in"' ;;
+        snell) pattern='"tag"[[:space:]]*:[[:space:]]*"snell-in"' ;;
+        *) return 1 ;;
+    esac
+
+    grep -q "${pattern}" "${CONFIG_FILE}"
 }
 
-config_has_snell() {
-    [ -f "${CONFIG_FILE}" ] && grep -q '"tag"[[:space:]]*:[[:space:]]*"snell-in"' "${CONFIG_FILE}"
-}
+has_protocol() {
+    local fragment_file
 
-has_reality_protocol() {
-    [ -f "${REALITY_FRAGMENT_FILE}" ] || config_has_reality
-}
-
-has_shadowtls_protocol() {
-    [ -f "${SHADOWTLS_FRAGMENT_FILE}" ] || config_has_shadowtls
-}
-
-has_hy2_protocol() {
-    [ -f "${HY2_FRAGMENT_FILE}" ] || config_has_hy2
-}
-
-has_snell_protocol() {
-    [ -f "${SNELL_FRAGMENT_FILE}" ] || config_has_snell
+    fragment_file=$(protocol_fragment_file "$1") || return 1
+    [ -f "${fragment_file}" ] || config_has_protocol "$1"
 }
 
 has_all_protocols() {
-    has_reality_protocol && has_hy2_protocol && has_shadowtls_protocol && has_snell_protocol
+    has_protocol reality && has_protocol hy2 && has_protocol shadowtls && has_protocol snell
+}
+
+extract_fragment_listen_port() {
+    awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "$1"
+}
+
+extract_shadowtls_ports() {
+    awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); ports[++i]=$2 } END { if (i >= 2) print ports[1], ports[2] }' "${SHADOWTLS_FRAGMENT_FILE}"
+}
+
+extract_json_string_field() {
+    local field=$1
+    local file=$2
+    awk -F\" -v field="\"${field}\"[[:space:]]*:" '$0 ~ field { print $4; exit }' "${file}"
 }
 
 extract_inbounds_to_fragment() {
@@ -566,7 +616,7 @@ extract_inbounds_to_fragment() {
     local output_file=$2
     local tmp_file="${output_file}.tmp"
 
-    awk -v protocol="${protocol}" '
+    if ! awk -v protocol="${protocol}" '
         function count_char(text, char,    i, total) {
             total = 0
             for (i = 1; i <= length(text); i++) {
@@ -588,6 +638,19 @@ extract_inbounds_to_fragment() {
             }
             return block ~ /"tag"[[:space:]]*:[[:space:]]*"shadowsocks-in"/ || block ~ /"type"[[:space:]]*:[[:space:]]*"shadowtls"/
         }
+        # 复用入站块收尾输出逻辑以避免开始行与结束行分支漂移
+        function flush_block() {
+            sub(/[[:space:]]*,[[:space:]]*$/, "", block)
+            if (wanted(block)) {
+                if (printed) {
+                    print ","
+                }
+                print block
+                printed = 1
+            }
+            capturing = 0
+            block = ""
+        }
         /"inbounds"[[:space:]]*:/ {
             in_inbounds = 1
             next
@@ -597,16 +660,7 @@ extract_inbounds_to_fragment() {
                 block = block "\n" $0
                 depth += count_char($0, "{") - count_char($0, "}")
                 if (depth == 0) {
-                    sub(/[[:space:]]*,[[:space:]]*$/, "", block)
-                    if (wanted(block)) {
-                        if (printed) {
-                            print ","
-                        }
-                        print block
-                        printed = 1
-                    }
-                    capturing = 0
-                    block = ""
+                    flush_block()
                 }
                 next
             }
@@ -616,16 +670,7 @@ extract_inbounds_to_fragment() {
                 block = $0
                 depth = count_char($0, "{") - count_char($0, "}")
                 if (depth == 0) {
-                    sub(/[[:space:]]*,[[:space:]]*$/, "", block)
-                    if (wanted(block)) {
-                        if (printed) {
-                            print ","
-                        }
-                        print block
-                        printed = 1
-                    }
-                    capturing = 0
-                    block = ""
+                    flush_block()
                 }
                 next
             }
@@ -639,11 +684,9 @@ extract_inbounds_to_fragment() {
                 exit 1
             }
         }
-    ' "${CONFIG_FILE}" > "${tmp_file}"
-
-    if [ $? -ne 0 ] || [ ! -s "${tmp_file}" ]; then
+    ' "${CONFIG_FILE}" > "${tmp_file}" || [ ! -s "${tmp_file}" ]; then
         rm -f "${tmp_file}"
-        echo -e "${RED}无法从现有配置导入 ${protocol} 入站配置，已停止以避免覆盖原配置。${RESET}"
+        echo -e "${RED}无法从现有配置导入 ${protocol} 入站配置，已停止以避免覆盖原配置。${RESET}" >&2
         exit 1
     fi
 
@@ -651,11 +694,12 @@ extract_inbounds_to_fragment() {
 }
 
 import_marked_client_section() {
-    local start_marker=$1
-    local end_marker=$2
-    local output_file=$3
+    local section_title=$1
+    local output_file=$2
+    local start_marker="===== BEGIN ${section_title} ====="
+    local end_marker="===== END ${section_title} ====="
 
-    awk -v start_marker="${start_marker}" -v end_marker="${end_marker}" '
+    if awk -v start_marker="${start_marker}" -v end_marker="${end_marker}" '
         $0 == start_marker {
             in_section = 1
             next
@@ -673,9 +717,7 @@ import_marked_client_section() {
                 exit 1
             }
         }
-    ' "${CLIENT_CONFIG_FILE}" > "${output_file}.tmp"
-
-    if [ $? -eq 0 ] && [ -s "${output_file}.tmp" ]; then
+    ' "${CLIENT_CONFIG_FILE}" > "${output_file}.tmp" && [ -s "${output_file}.tmp" ]; then
         mv "${output_file}.tmp" "${output_file}"
     else
         rm -f "${output_file}.tmp"
@@ -688,48 +730,38 @@ import_existing_clients() {
     fi
 
     if grep -q '^===== BEGIN VLESS Reality =====$' "${CLIENT_CONFIG_FILE}"; then
-        [ -f "${REALITY_CLIENT_FILE}" ] || import_marked_client_section "===== BEGIN VLESS Reality =====" "===== END VLESS Reality =====" "${REALITY_CLIENT_FILE}"
-        [ -f "${HY2_CLIENT_FILE}" ] || import_marked_client_section "===== BEGIN Hysteria2 =====" "===== END Hysteria2 =====" "${HY2_CLIENT_FILE}"
-        [ -f "${SHADOWTLS_CLIENT_FILE}" ] || import_marked_client_section "===== BEGIN ShadowTLS + Shadowsocks =====" "===== END ShadowTLS + Shadowsocks =====" "${SHADOWTLS_CLIENT_FILE}"
-        [ -f "${SNELL_CLIENT_FILE}" ] || import_marked_client_section "===== BEGIN Snell =====" "===== END Snell =====" "${SNELL_CLIENT_FILE}"
+        [ -f "${REALITY_CLIENT_FILE}" ] || import_marked_client_section "VLESS Reality" "${REALITY_CLIENT_FILE}"
+        [ -f "${HY2_CLIENT_FILE}" ] || import_marked_client_section "Hysteria2" "${HY2_CLIENT_FILE}"
+        [ -f "${SHADOWTLS_CLIENT_FILE}" ] || import_marked_client_section "ShadowTLS + Shadowsocks" "${SHADOWTLS_CLIENT_FILE}"
+        [ -f "${SNELL_CLIENT_FILE}" ] || import_marked_client_section "Snell" "${SNELL_CLIENT_FILE}"
         return
     fi
 
-    if config_has_reality && ! config_has_hy2 && ! config_has_shadowtls && [ ! -f "${REALITY_CLIENT_FILE}" ]; then
+    if config_has_protocol reality && ! config_has_protocol hy2 && ! config_has_protocol shadowtls && [ ! -f "${REALITY_CLIENT_FILE}" ]; then
         cp "${CLIENT_CONFIG_FILE}" "${REALITY_CLIENT_FILE}"
-    elif config_has_hy2 && ! config_has_reality && ! config_has_shadowtls && [ ! -f "${HY2_CLIENT_FILE}" ]; then
+    elif config_has_protocol hy2 && ! config_has_protocol reality && ! config_has_protocol shadowtls && [ ! -f "${HY2_CLIENT_FILE}" ]; then
         cp "${CLIENT_CONFIG_FILE}" "${HY2_CLIENT_FILE}"
-    elif config_has_shadowtls && ! config_has_reality && ! config_has_hy2 && [ ! -f "${SHADOWTLS_CLIENT_FILE}" ]; then
+    elif config_has_protocol shadowtls && ! config_has_protocol reality && ! config_has_protocol hy2 && [ ! -f "${SHADOWTLS_CLIENT_FILE}" ]; then
         cp "${CLIENT_CONFIG_FILE}" "${SHADOWTLS_CLIENT_FILE}"
     fi
 }
 
 import_existing_protocols() {
+    local protocol fragment_file
+
     ensure_state_dirs
 
     if [ ! -f "${CONFIG_FILE}" ]; then
         return
     fi
 
-    if config_has_reality && [ ! -f "${REALITY_FRAGMENT_FILE}" ]; then
-        echo -e "${CYAN}检测到现有 VLESS Reality 配置，正在导入以便合并管理...${RESET}"
-        extract_inbounds_to_fragment "reality" "${REALITY_FRAGMENT_FILE}"
-    fi
-
-    if config_has_shadowtls && [ ! -f "${SHADOWTLS_FRAGMENT_FILE}" ]; then
-        echo -e "${CYAN}检测到现有 ShadowTLS 配置，正在导入以便合并管理...${RESET}"
-        extract_inbounds_to_fragment "shadowtls" "${SHADOWTLS_FRAGMENT_FILE}"
-    fi
-
-    if config_has_hy2 && [ ! -f "${HY2_FRAGMENT_FILE}" ]; then
-        echo -e "${CYAN}检测到现有 Hysteria2 配置，正在导入以便合并管理...${RESET}"
-        extract_inbounds_to_fragment "hy2" "${HY2_FRAGMENT_FILE}"
-    fi
-
-    if config_has_snell && [ ! -f "${SNELL_FRAGMENT_FILE}" ]; then
-        echo -e "${CYAN}检测到现有 Snell 配置，正在导入以便合并管理...${RESET}"
-        extract_inbounds_to_fragment "snell" "${SNELL_FRAGMENT_FILE}"
-    fi
+    for protocol in reality shadowtls hy2 snell; do
+        fragment_file=$(protocol_fragment_file "${protocol}")
+        if config_has_protocol "${protocol}" && [ ! -f "${fragment_file}" ]; then
+            echo -e "${CYAN}检测到现有 $(protocol_label "${protocol}") 配置，正在导入以便合并管理...${RESET}"
+            extract_inbounds_to_fragment "${protocol}" "${fragment_file}"
+        fi
+    done
 
     import_existing_clients
 }
@@ -737,6 +769,8 @@ import_existing_protocols() {
 render_config() {
     local first=1
     local upstream_enabled=0
+    local log_config fragment_file
+    local upstream_type="" upstream_server="" upstream_port="" upstream_username="" upstream_password=""
     ensure_state_dirs
 
     if has_upstream_outbound; then
@@ -744,17 +778,17 @@ render_config() {
     fi
 
     if ! is_log_enabled; then
-        LOG_CONFIG='  "log": {
+        log_config='  "log": {
     "disabled": true
   },'
-    elif [ "$IS_ALPINE" -eq 1 ]; then
-        LOG_CONFIG='  "log": {
+    elif [ "${IS_ALPINE}" -eq 1 ]; then
+        log_config='  "log": {
     "level": "info",
     "timestamp": true,
     "output": "/var/log/sing-box.log"
   },'
     else
-        LOG_CONFIG='  "log": {
+        log_config='  "log": {
     "level": "info",
     "timestamp": true
   },'
@@ -763,7 +797,7 @@ render_config() {
     {
         cat << EOF
 {
-${LOG_CONFIG}
+${log_config}
   "dns": {
     "servers": [
       {
@@ -831,48 +865,40 @@ EOF
     } > "${CONFIG_FILE}"
 }
 
+append_client_section() {
+    local section_title=$1
+    local client_file=$2
+    local trailing_blank=${3:-1}
+
+    [ -f "${client_file}" ] || return 0
+    echo "===== BEGIN ${section_title} ====="
+    cat "${client_file}"
+    echo "===== END ${section_title} ====="
+    if [ "${trailing_blank}" -eq 1 ]; then
+        echo ""
+    fi
+}
+
 render_client_config() {
     ensure_state_dirs
 
     {
-        if [ -f "${REALITY_CLIENT_FILE}" ]; then
-            echo "===== BEGIN VLESS Reality ====="
-            cat "${REALITY_CLIENT_FILE}"
-            echo "===== END VLESS Reality ====="
-            echo ""
-        fi
-
-        if [ -f "${HY2_CLIENT_FILE}" ]; then
-            echo "===== BEGIN Hysteria2 ====="
-            cat "${HY2_CLIENT_FILE}"
-            echo "===== END Hysteria2 ====="
-            echo ""
-        fi
-
-        if [ -f "${SHADOWTLS_CLIENT_FILE}" ]; then
-            echo "===== BEGIN ShadowTLS + Shadowsocks ====="
-            cat "${SHADOWTLS_CLIENT_FILE}"
-            echo "===== END ShadowTLS + Shadowsocks ====="
-            echo ""
-        fi
-
-        if [ -f "${SNELL_CLIENT_FILE}" ]; then
-            echo "===== BEGIN Snell ====="
-            cat "${SNELL_CLIENT_FILE}"
-            echo "===== END Snell ====="
-        fi
+        append_client_section "VLESS Reality" "${REALITY_CLIENT_FILE}"
+        append_client_section "Hysteria2" "${HY2_CLIENT_FILE}"
+        append_client_section "ShadowTLS + Shadowsocks" "${SHADOWTLS_CLIENT_FILE}"
+        append_client_section "Snell" "${SNELL_CLIENT_FILE}" 0
     } > "${CLIENT_CONFIG_FILE}"
 }
 
 setup_logrotate_for_alpine() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if [ "${IS_ALPINE}" -eq 1 ]; then
         if ! is_log_enabled; then
             rm -f /etc/logrotate.d/sing-box
             return
         fi
 
         echo -e "${CYAN}检测到 Alpine 环境，正在配置 logrotate 自动清理日志...${RESET}"
-        apk add logrotate > /dev/null 2>&1
+        apk add logrotate >/dev/null 2>&1
         cat > /etc/logrotate.d/sing-box << EOF
 /var/log/sing-box.log {
     daily
@@ -886,7 +912,13 @@ EOF
     fi
 }
 
+install_sing_box_deb() {
+    bash <(curl -fsSL https://sing-box.app/deb-install.sh)
+}
+
 install_sing_box_binary() {
+    local repo
+
     check_ss_command
 
     if is_sing_box_installed; then
@@ -896,36 +928,35 @@ install_sing_box_binary() {
 
     echo -e "${CYAN}正在安装 sing-box${RESET}"
 
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if [ "${IS_ALPINE}" -eq 1 ]; then
         echo -e "${YELLOW}检测到 Alpine Linux，使用 apk 安装...${RESET}"
         for repo in community testing; do
-            if ! grep -q "edge/$repo" /etc/apk/repositories; then
-                echo "https://dl-cdn.alpinelinux.org/alpine/edge/$repo" >> /etc/apk/repositories
+            if ! grep -q "edge/${repo}" /etc/apk/repositories; then
+                echo "https://dl-cdn.alpinelinux.org/alpine/edge/${repo}" >> /etc/apk/repositories
             fi
         done
         apk update
-        apk add sing-box
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}sing-box 安装失败，请检查错误信息${RESET}"
+        if ! apk add sing-box; then
+            echo -e "${RED}sing-box 安装失败，请检查错误信息${RESET}" >&2
             exit 1
         fi
     else
-        bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
-            echo -e "${RED}sing-box 安装失败！请检查网络连接或安装脚本来源。${RESET}"
+        install_sing_box_deb || {
+            echo -e "${RED}sing-box 安装失败！请检查网络连接或安装脚本来源。${RESET}" >&2
             exit 1
         }
     fi
 }
 
 enable_sing_box_service() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if [ "${IS_ALPINE}" -eq 1 ]; then
         rc-update add "${SERVICE_NAME}" default || {
-            echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}"
+            echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}" >&2
             exit 1
         }
     else
         systemctl enable "${SERVICE_NAME}" || {
-            echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}"
+            echo -e "${RED}无法启用 ${SERVICE_NAME} 服务！${RESET}" >&2
             exit 1
         }
     fi
@@ -941,8 +972,8 @@ reload_sing_box_service() {
     fi
 
     if ! is_sing_box_running; then
-        echo -e "${RED}${SERVICE_NAME} 服务未成功启动！${RESET}"
-        if [ "$IS_ALPINE" -eq 1 ]; then rc-service "${SERVICE_NAME}" status; else systemctl status "${SERVICE_NAME}"; fi
+        echo -e "${RED}${SERVICE_NAME} 服务未成功启动！${RESET}" >&2
+        if [ "${IS_ALPINE}" -eq 1 ]; then rc-service "${SERVICE_NAME}" status; else systemctl status "${SERVICE_NAME}"; fi
         exit 1
     fi
 }
@@ -951,30 +982,15 @@ install_package_if_missing() {
     local command_name=$1
     local package_name=$2
 
-    if command -v "${command_name}" &> /dev/null; then
+    if command -v "${command_name}" >/dev/null 2>&1; then
         return
     fi
 
     echo -e "${YELLOW}${command_name} 未安装，正在尝试安装 ${package_name}...${RESET}"
-    if [ "$IS_ALPINE" -eq 1 ]; then
-        apk add "${package_name}"
-    elif command -v apt-get &> /dev/null; then
-        apt-get update && apt-get install -y "${package_name}"
-    elif command -v yum &> /dev/null; then
-        yum install -y "${package_name}"
-    elif command -v dnf &> /dev/null; then
-        dnf install -y "${package_name}"
-    elif command -v pacman &> /dev/null; then
-        pacman -Sy --noconfirm "${package_name}"
-    elif command -v zypper &> /dev/null; then
-        zypper install -y "${package_name}"
-    else
-        echo -e "${RED}无法检测到支持的包管理器，请手动安装 ${package_name}${RESET}"
-        exit 1
-    fi
+    install_system_package "${package_name}" "${package_name}" 0 "${package_name}"
 
-    if ! command -v "${command_name}" &> /dev/null; then
-        echo -e "${RED}${command_name} 安装失败，请手动安装 ${package_name}${RESET}"
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+        echo -e "${RED}${command_name} 安装失败，请手动安装 ${package_name}${RESET}" >&2
         exit 1
     fi
 }
@@ -985,7 +1001,7 @@ get_valid_mbps() {
     local value
 
     while true; do
-        read -p "${prompt}" value
+        read -r -p "${prompt}" value
         value=${value:-${default_value}}
 
         if [[ "${value}" =~ ^[0-9]+$ ]] && [ "${value}" -gt 0 ]; then
@@ -1003,7 +1019,7 @@ get_valid_interval() {
     local value number
 
     while true; do
-        read -p "${prompt}" value
+        read -r -p "${prompt}" value
         value=${value:-${default_value}}
         number=${value%s}
 
@@ -1022,7 +1038,7 @@ get_valid_port_range() {
     local range start end
 
     while true; do
-        read -p "${prompt}" range
+        read -r -p "${prompt}" range
         range=${range:-${default_value}}
         range=$(echo "${range}" | tr -d ' ' | tr '-' ':')
 
@@ -1030,7 +1046,7 @@ get_valid_port_range() {
             start=${BASH_REMATCH[1]}
             end=${BASH_REMATCH[2]}
 
-            if [ "${start}" -ge 1 ] && [ "${end}" -le 65535 ] && [ "${start}" -lt "${end}" ]; then
+            if is_valid_port "${start}" && is_valid_port "${end}" && [ "${start}" -lt "${end}" ]; then
                 echo "${start}:${end}"
                 return
             fi
@@ -1064,7 +1080,7 @@ EOF
 
 load_hy2_state() {
     if [ ! -f "${HY2_STATE_FILE}" ]; then
-        echo -e "${RED}缺少 HY2 状态文件，无法安全修改。建议删除后重新安装 HY2。${RESET}"
+        echo -e "${RED}缺少 HY2 状态文件，无法安全修改。建议删除后重新安装 HY2。${RESET}" >&2
         return 1
     fi
 
@@ -1091,7 +1107,7 @@ generate_hy2_certificate() {
             -out "${HY2_CERT_FILE}" \
             -days 3650 \
             -subj "/CN=${hy2_sni}" >/dev/null 2>&1 || {
-                echo -e "${RED}Hysteria2 证书生成失败${RESET}"
+                echo -e "${RED}Hysteria2 证书生成失败${RESET}" >&2
                 exit 1
             }
     fi
@@ -1142,7 +1158,7 @@ EOF
 }
 
 disable_hy2_port_hopping_runtime() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if [ "${IS_ALPINE}" -eq 1 ]; then
         if [ -f "${HY2_PORT_HOP_OPENRC_SERVICE}" ]; then
             rc-service sing-box-hy2-port-hop stop >/dev/null 2>&1 || true
             rc-update del sing-box-hy2-port-hop default >/dev/null 2>&1 || true
@@ -1167,7 +1183,7 @@ enable_hy2_port_hopping_runtime() {
     disable_hy2_port_hopping_runtime
     write_hy2_port_hop_script
 
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if [ "${IS_ALPINE}" -eq 1 ]; then
         cat > "${HY2_PORT_HOP_OPENRC_SERVICE}" << EOF
 #!/sbin/openrc-run
 description="sing-box Hysteria2 port hopping rules"
@@ -1274,7 +1290,7 @@ nft_rule_marker() {
 nft_delete_managed_rules() {
     local proto=$1
     local port=$2
-    local marker
+    local marker family table chain handle
 
     marker=$(nft_rule_marker "${proto}" "${port}")
     nft -a list ruleset 2>/dev/null | awk -v marker="${marker}" '
@@ -1323,10 +1339,8 @@ firewall_add_rule() {
             fi
             ;;
         nftables)
-            set -- $(nft_input_chain)
-            nft_family=$1
-            nft_table=$2
-            nft_chain=$3
+            # 用 read 解析空格字段以避免覆盖调用方位置参数
+            IFS=' ' read -r nft_family nft_table nft_chain <<< "$(nft_input_chain)" || true
             [ -n "${nft_family}" ] && [ -n "${nft_table}" ] && [ -n "${nft_chain}" ] || return 1
             nft_delete_managed_rules "${proto}" "${port}"
             nft insert rule "${nft_family}" "${nft_table}" "${nft_chain}" "${proto}" dport "${formatted_port}" accept comment "$(nft_rule_marker "${proto}" "${port}")" >/dev/null 2>&1 || return 1
@@ -1458,18 +1472,19 @@ add_firewall_rule_once() {
     if firewall_add_rule "${backend}" "${proto}" "${port}"; then
         echo -e "${GREEN}已放行 ${label}: ${port}/${proto}${RESET}"
     else
-        echo -e "${YELLOW}放行失败或不支持: ${label} ${port}/${proto}${RESET}"
+        echo -e "${YELLOW}放行失败或不支持: ${label} ${port}/${proto}${RESET}" >&2
     fi
 }
 
 apply_current_firewall_rules() {
-    local backend reality_port hy2_current_port shadow_ports shadow_ssport shadow_sport snell_port
+    local backend reality_port shadow_ports shadow_ssport shadow_sport snell_port
+    local hy2_port hy2_password hy2_obfs_password hy2_sni hy2_up_mbps hy2_down_mbps hy2_hop_enabled hy2_hop_range hy2_hop_interval
 
     ensure_state_dirs
     backend=$(detect_firewall_backend)
 
     if [ "${backend}" = "none" ]; then
-        echo -e "${YELLOW}未检测到 ufw / firewalld / iptables，未修改防火墙。${RESET}"
+        echo -e "${YELLOW}未检测到 ufw / firewalld / iptables，未修改防火墙。${RESET}" >&2
         return
     fi
 
@@ -1479,7 +1494,7 @@ apply_current_firewall_rules() {
     echo -e "${CYAN}使用 ${backend} 自动放行当前协议端口...${RESET}"
 
     if [ -f "${REALITY_FRAGMENT_FILE}" ]; then
-        reality_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${REALITY_FRAGMENT_FILE}")
+        reality_port=$(extract_fragment_listen_port "${REALITY_FRAGMENT_FILE}")
         [ -n "${reality_port}" ] && add_firewall_rule_once "${backend}" "tcp" "${reality_port}" "Reality"
     fi
 
@@ -1495,10 +1510,8 @@ apply_current_firewall_rules() {
     fi
 
     if [ -f "${SHADOWTLS_FRAGMENT_FILE}" ]; then
-        shadow_ports=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); ports[++i]=$2 } END { if (i >= 2) print ports[1], ports[2] }' "${SHADOWTLS_FRAGMENT_FILE}")
-        set -- ${shadow_ports}
-        shadow_ssport=$1
-        shadow_sport=$2
+        shadow_ports=$(extract_shadowtls_ports)
+        IFS=' ' read -r shadow_ssport shadow_sport <<< "${shadow_ports}" || true
         [ -n "${shadow_sport}" ] && add_firewall_rule_once "${backend}" "tcp" "${shadow_sport}" "ShadowTLS"
         if [ -n "${shadow_ssport}" ]; then
             add_firewall_rule_once "${backend}" "udp" "${shadow_ssport}" "Shadowsocks"
@@ -1506,7 +1519,7 @@ apply_current_firewall_rules() {
     fi
 
     if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
-        snell_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${SNELL_FRAGMENT_FILE}")
+        snell_port=$(extract_fragment_listen_port "${SNELL_FRAGMENT_FILE}")
         [ -n "${snell_port}" ] && add_firewall_rule_once "${backend}" "tcp" "${snell_port}" "Snell"
     fi
 
@@ -1517,6 +1530,7 @@ apply_current_firewall_rules() {
 
 show_firewall_status() {
     local backend reality_port shadow_ports shadow_ssport shadow_sport snell_port printed_ports
+    local hy2_port hy2_password hy2_obfs_password hy2_sni hy2_up_mbps hy2_down_mbps hy2_hop_enabled hy2_hop_range hy2_hop_interval
 
     import_existing_protocols
     backend=$(detect_firewall_backend)
@@ -1540,7 +1554,7 @@ show_firewall_status() {
     printed_ports=0
 
     if [ -f "${REALITY_FRAGMENT_FILE}" ]; then
-        reality_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${REALITY_FRAGMENT_FILE}")
+        reality_port=$(extract_fragment_listen_port "${REALITY_FRAGMENT_FILE}")
         print_firewall_port_status "${backend}" "Reality" "tcp" "${reality_port}"
         printed_ports=1
     fi
@@ -1554,17 +1568,15 @@ show_firewall_status() {
     fi
 
     if [ -f "${SHADOWTLS_FRAGMENT_FILE}" ]; then
-        shadow_ports=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); ports[++i]=$2 } END { if (i >= 2) print ports[1], ports[2] }' "${SHADOWTLS_FRAGMENT_FILE}")
-        set -- ${shadow_ports}
-        shadow_ssport=$1
-        shadow_sport=$2
+        shadow_ports=$(extract_shadowtls_ports)
+        IFS=' ' read -r shadow_ssport shadow_sport <<< "${shadow_ports}" || true
         print_firewall_port_status "${backend}" "ShadowTLS" "tcp" "${shadow_sport}"
         print_firewall_port_status "${backend}" "Shadowsocks" "udp" "${shadow_ssport}"
         printed_ports=1
     fi
 
     if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
-        snell_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${SNELL_FRAGMENT_FILE}")
+        snell_port=$(extract_fragment_listen_port "${SNELL_FRAGMENT_FILE}")
         print_firewall_port_status "${backend}" "Snell" "tcp" "${snell_port}"
         printed_ports=1
     fi
@@ -1606,12 +1618,12 @@ EOF
 
 write_reality_client() {
     local uri_host
-    uri_host=$(format_host_for_uri "${host_ip}")
+    uri_host=$(format_host_for_uri "${HOST_IP}")
 
     {
         echo -e "${PURPLE}=============== 明文参数 ===============${RESET}"
         echo "节点类型  : VLESS"
-        echo "服务器IP  : ${host_ip}"
+        echo "服务器IP  : ${HOST_IP}"
         echo "监听端口  : ${listen_port}"
         echo "UUID      : ${uuid}"
         echo "流控(flow): xtls-rprx-vision"
@@ -1623,16 +1635,16 @@ write_reality_client() {
         echo "指纹(fp)  : chrome"
 
         echo -e "\n${CYAN}=============== 通用分享链接 ===============${RESET}"
-        echo -e "${YELLOW}vless://${uuid}@${uri_host}:${listen_port}?security=reality&sni=${sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp&flow=xtls-rprx-vision#${ip_country}-VLESS-Reality${RESET}"
+        echo -e "${YELLOW}vless://${uuid}@${uri_host}:${listen_port}?security=reality&sni=${sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp&flow=xtls-rprx-vision#${IP_COUNTRY}-VLESS-Reality${RESET}"
 
         echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
-        echo -e "${YELLOW}${ip_country}-VLESS = VLESS,${host_ip},${listen_port},\"${uuid}\",transport=tcp,flow=xtls-rprx-vision,public-key=\"${public_key}\",short-id=${short_id},udp=true,block-quic=false,over-tls=true,sni=${sni}${RESET}"
+        echo -e "${YELLOW}${IP_COUNTRY}-VLESS = VLESS,${HOST_IP},${listen_port},\"${uuid}\",transport=tcp,flow=xtls-rprx-vision,public-key=\"${public_key}\",short-id=${short_id},udp=true,block-quic=false,over-tls=true,sni=${sni}${RESET}"
 
         echo -e "\n${CYAN}=============== Clash Meta / Mihomo ===============${RESET}"
         cat << EOF
-  - name: ${ip_country}-VLESS-Reality
+  - name: ${IP_COUNTRY}-VLESS-Reality
     type: vless
-    server: ${host_ip}
+    server: ${HOST_IP}
     port: ${listen_port}
     uuid: ${uuid}
     network: tcp
@@ -1650,8 +1662,8 @@ EOF
         cat << EOF
 {
   "type": "vless",
-  "tag": "${ip_country}-VLESS-Reality",
-  "server": "${host_ip}",
+  "tag": "${IP_COUNTRY}-VLESS-Reality",
+  "server": "${HOST_IP}",
   "server_port": ${listen_port},
   "uuid": "${uuid}",
   "flow": "xtls-rprx-vision",
@@ -1674,7 +1686,10 @@ EOF
     } > "${REALITY_CLIENT_FILE}"
 }
 
+# 在安装入口内用局部变量隔离各协议临时生成参数
 install_reality_protocol() {
+    local listen_port sni uuid short_id keys private_key public_key
+
     if [ -f "${REALITY_FRAGMENT_FILE}" ]; then
         echo -e "${YELLOW}VLESS Reality 已存在，跳过安装${RESET}"
         return
@@ -1682,7 +1697,7 @@ install_reality_protocol() {
 
     listen_port=$(get_valid_port "请输入 VLESS 监听端口 (默认随机，回车确认): ")
 
-    read -p "请输入伪装域名 SNI (默认: www.postgresql.org): " sni
+    read -r -p "请输入伪装域名 SNI (默认: www.postgresql.org): " sni
     sni=${sni:-www.postgresql.org}
 
     echo -e "${CYAN}正在生成 UUID...${RESET}"
@@ -1690,14 +1705,14 @@ install_reality_protocol() {
     short_id=$(tr -dc 'a-f0-9' </dev/urandom | head -c 16)
 
     keys=$(sing-box generate reality-keypair)
-    private_key=$(echo "$keys" | grep "PrivateKey" | awk '{print $2}')
-    public_key=$(echo "$keys" | grep "PublicKey" | awk '{print $2}')
+    private_key=$(echo "${keys}" | grep "PrivateKey" | awk '{print $2}')
+    public_key=$(echo "${keys}" | grep "PublicKey" | awk '{print $2}')
 
     set_current_host_info
 
     write_reality_fragment
     write_reality_client
-    PROTOCOL_CHANGED=1
+    protocol_changed=1
 }
 
 write_shadowtls_fragment() {
@@ -1706,7 +1721,7 @@ write_shadowtls_fragment() {
       "type": "shadowsocks",
       "tag": "shadowsocks-in",
       "listen": "::",
-      "listen_port": ${ssport},
+      "listen_port": ${ss_port},
       "method": "2022-blake3-aes-128-gcm",
       "password": "${ss_password}",
       "multiplex": {
@@ -1716,12 +1731,12 @@ write_shadowtls_fragment() {
     {
       "type": "shadowtls",
       "listen": "::",
-      "listen_port": ${sport},
+      "listen_port": ${shadowtls_port},
       "detour": "shadowsocks-in",
       "version": 3,
       "users": [
         {
-          "password": "${password}"
+          "password": "${shadowtls_password}"
         }
       ],
       "handshake": {
@@ -1739,34 +1754,34 @@ write_shadowtls_client() {
     local uri_host
 
     encoded_ss_password=$(url_encode "${ss_password}")
-    encoded_plugin=$(url_encode "shadow-tls;host=${shadowtls_sni};passwd=${password};v3")
-    uri_host=$(format_host_for_uri "${host_ip}")
+    encoded_plugin=$(url_encode "shadow-tls;host=${shadowtls_sni};passwd=${shadowtls_password};v3")
+    uri_host=$(format_host_for_uri "${HOST_IP}")
 
     {
         echo -e "${PURPLE}=============== 明文参数 ===============${RESET}"
         echo "节点类型        : ShadowTLS + Shadowsocks"
-        echo "服务器IP        : ${host_ip}"
-        echo "ShadowTLS 端口  : ${sport}"
-        echo "Shadowsocks 端口: ${ssport}"
+        echo "服务器IP        : ${HOST_IP}"
+        echo "ShadowTLS 端口  : ${shadowtls_port}"
+        echo "Shadowsocks 端口: ${ss_port}"
         echo "加密方法        : 2022-blake3-aes-128-gcm"
         echo "Shadowsocks 密码: ${ss_password}"
-        echo "ShadowTLS 密码  : ${password}"
+        echo "ShadowTLS 密码  : ${shadowtls_password}"
         echo "伪装域名        : ${shadowtls_sni}"
         echo "ShadowTLS 版本  : 3"
         echo "指纹(fp)        : chrome"
 
         echo -e "\n${CYAN}=============== 通用分享链接 ===============${RESET}"
-        echo -e "${YELLOW}ss://2022-blake3-aes-128-gcm:${encoded_ss_password}@${uri_host}:${sport}/?plugin=${encoded_plugin}#${ip_country}-ShadowTLS${RESET}"
+        echo -e "${YELLOW}ss://2022-blake3-aes-128-gcm:${encoded_ss_password}@${uri_host}:${shadowtls_port}/?plugin=${encoded_plugin}#${IP_COUNTRY}-ShadowTLS${RESET}"
 
         echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
-        echo -e "${YELLOW}${ip_country}-ShadowTLS = Shadowsocks,${host_ip},${sport},2022-blake3-aes-128-gcm,\"${ss_password}\",shadow-tls-password=${password},shadow-tls-sni=${shadowtls_sni},shadow-tls-version=3,udp-port=${ssport},fast-open=false,udp=true${RESET}"
+        echo -e "${YELLOW}${IP_COUNTRY}-ShadowTLS = Shadowsocks,${HOST_IP},${shadowtls_port},2022-blake3-aes-128-gcm,\"${ss_password}\",shadow-tls-password=${shadowtls_password},shadow-tls-sni=${shadowtls_sni},shadow-tls-version=3,udp-port=${ss_port},fast-open=false,udp=true${RESET}"
 
         echo -e "\n${CYAN}=============== Clash Meta / Mihomo ===============${RESET}"
         cat << EOF
-  - name: ${ip_country}-ShadowTLS
+  - name: ${IP_COUNTRY}-ShadowTLS
     type: ss
-    server: ${host_ip}
-    port: ${sport}
+    server: ${HOST_IP}
+    port: ${shadowtls_port}
     cipher: 2022-blake3-aes-128-gcm
     password: ${ss_password}
     udp: true
@@ -1775,7 +1790,7 @@ write_shadowtls_client() {
     plugin-opts:
       mode: tls
       host: ${shadowtls_sni}
-      password: ${password}
+      password: ${shadowtls_password}
       version: 3
     smux:
       enabled: true
@@ -1786,20 +1801,20 @@ EOF
 [
   {
     "type": "shadowsocks",
-    "tag": "${ip_country}-ShadowTLS-SS",
-    "server": "${host_ip}",
-    "server_port": ${ssport},
+    "tag": "${IP_COUNTRY}-ShadowTLS-SS",
+    "server": "${HOST_IP}",
+    "server_port": ${ss_port},
     "method": "2022-blake3-aes-128-gcm",
     "password": "${ss_password}",
-    "detour": "${ip_country}-ShadowTLS"
+    "detour": "${IP_COUNTRY}-ShadowTLS"
   },
   {
     "type": "shadowtls",
-    "tag": "${ip_country}-ShadowTLS",
-    "server": "${host_ip}",
-    "server_port": ${sport},
+    "tag": "${IP_COUNTRY}-ShadowTLS",
+    "server": "${HOST_IP}",
+    "server_port": ${shadowtls_port},
     "version": 3,
-    "password": "${password}",
+    "password": "${shadowtls_password}",
     "tls": {
       "enabled": true,
       "server_name": "${shadowtls_sni}",
@@ -1816,25 +1831,27 @@ EOF
 }
 
 install_shadowtls_protocol() {
+    local shadowtls_port ss_port shadowtls_sni ss_password shadowtls_password
+
     if [ -f "${SHADOWTLS_FRAGMENT_FILE}" ]; then
         echo -e "${YELLOW}ShadowTLS 已存在，跳过安装${RESET}"
         return
     fi
 
-    sport=$(get_valid_port "请输入 ShadowTLS 监听端口 (默认随机，回车确认): ")
-    ssport=$(get_valid_port "请输入 Shadowsocks 监听端口 (默认随机，回车确认): ")
+    shadowtls_port=$(get_valid_port "请输入 ShadowTLS 监听端口 (默认随机，回车确认): ")
+    ss_port=$(get_valid_port "请输入 Shadowsocks 监听端口 (默认随机，回车确认): ")
 
-    read -p "请输入 ShadowTLS 伪装域名 SNI (默认: www.postgresql.org): " shadowtls_sni
+    read -r -p "请输入 ShadowTLS 伪装域名 SNI (默认: www.postgresql.org): " shadowtls_sni
     shadowtls_sni=${shadowtls_sni:-www.postgresql.org}
 
     ss_password=$(sing-box generate rand 16 --base64)
-    password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
+    shadowtls_password=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
 
     set_current_host_info
 
     write_shadowtls_fragment
     write_shadowtls_client
-    PROTOCOL_CHANGED=1
+    protocol_changed=1
 }
 
 write_hy2_fragment() {
@@ -1869,7 +1886,7 @@ EOF
 write_hy2_client() {
     local uri_host hy2_uri_port hy2_uri encoded_password encoded_obfs hop_range_dash hop_interval_seconds
 
-    uri_host=$(format_host_for_uri "${host_ip}")
+    uri_host=$(format_host_for_uri "${HOST_IP}")
     encoded_password=$(url_encode "${hy2_password}")
     encoded_obfs=$(url_encode "${hy2_obfs_password}")
     hop_range_dash=$(range_colon_to_dash "${hy2_hop_range}")
@@ -1881,12 +1898,12 @@ write_hy2_client() {
         hy2_uri_port="${hy2_port}"
     fi
 
-    hy2_uri="hysteria2://${encoded_password}@${uri_host}:${hy2_uri_port}/?insecure=1&obfs=salamander&obfs-password=${encoded_obfs}&sni=${hy2_sni}#${ip_country}-HY2"
+    hy2_uri="hysteria2://${encoded_password}@${uri_host}:${hy2_uri_port}/?insecure=1&obfs=salamander&obfs-password=${encoded_obfs}&sni=${hy2_sni}#${IP_COUNTRY}-HY2"
 
     {
         echo -e "${PURPLE}=============== 明文参数 ===============${RESET}"
         echo "节点类型      : Hysteria2"
-        echo "服务器IP      : ${host_ip}"
+        echo "服务器IP      : ${HOST_IP}"
         echo "监听端口      : ${hy2_port}"
         echo "认证密码      : ${hy2_password}"
         echo "混淆类型      : salamander"
@@ -1904,13 +1921,13 @@ write_hy2_client() {
         echo -e "${YELLOW}${hy2_uri}${RESET}"
 
         echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
-        echo -e "${YELLOW}${ip_country}-HY2 = Hysteria2,${host_ip},${hy2_port},\"${hy2_password}\",tls-name=${hy2_sni},skip-cert-verify=true,salamander-password=${hy2_obfs_password},fast-open=false${RESET}"
+        echo -e "${YELLOW}${IP_COUNTRY}-HY2 = Hysteria2,${HOST_IP},${hy2_port},\"${hy2_password}\",tls-name=${hy2_sni},skip-cert-verify=true,salamander-password=${hy2_obfs_password},fast-open=false${RESET}"
 
         echo -e "\n${CYAN}=============== Clash Meta / Mihomo ===============${RESET}"
         cat << EOF
-  - name: ${ip_country}-HY2
+  - name: ${IP_COUNTRY}-HY2
     type: hysteria2
-    server: ${host_ip}
+    server: ${HOST_IP}
     port: ${hy2_port}
 EOF
         if [ "${hy2_hop_enabled}" = "true" ]; then
@@ -1935,8 +1952,8 @@ EOF
         cat << EOF
 {
   "type": "hysteria2",
-  "tag": "${ip_country}-HY2",
-  "server": "${host_ip}",
+  "tag": "${IP_COUNTRY}-HY2",
+  "server": "${HOST_IP}",
 EOF
         if [ "${hy2_hop_enabled}" = "true" ]; then
             cat << EOF
@@ -2002,7 +2019,7 @@ install_snell_core_from_github() {
         return 1
     fi
 
-    if command -v apk &> /dev/null; then
+    if command -v apk >/dev/null 2>&1; then
         echo -e "${CYAN}官方二进制为 glibc 动态链接，安装 gcompat 兼容层...${RESET}"
         apk add --no-cache gcompat || {
             echo -e "${RED}安装 gcompat 兼容层失败${RESET}" >&2
@@ -2017,14 +2034,14 @@ install_snell_core_from_github() {
         return 1
     }
 
-    if ! sing-box version &> /dev/null; then
+    if ! sing-box version >/dev/null 2>&1; then
         if [ "${arch}" = "amd64" ] && [ ! -e /lib64/ld-linux-x86-64.so.2 ]; then
             echo -e "${CYAN}创建 /lib64 动态链接器兼容链接...${RESET}"
             mkdir -p /lib64
             ln -sf /lib/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
         fi
 
-        if ! sing-box version &> /dev/null; then
+        if ! sing-box version >/dev/null 2>&1; then
             echo -e "${RED}sing-box 二进制仍无法执行，请检查架构与依赖${RESET}" >&2
             rm -rf "${tmp_dir}"
             return 1
@@ -2036,80 +2053,78 @@ install_snell_core_from_github() {
     echo -e "${GREEN}已安装 GitHub 官方 sing-box ${version}${RESET}"
 }
 
-ensure_snell_capable_core() {
-    local current_version oldest confirm
+get_sing_box_version() {
+    sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1
+}
 
-    if ! command -v sing-box &> /dev/null; then
+is_version_at_least() {
+    local current_version=$1
+    local required_version=$2
+    local oldest
+
+    oldest=$(printf '%s\n%s\n' "${required_version}" "${current_version}" | sort -V | head -n1)
+    [ "${oldest}" = "${required_version}" ]
+}
+
+ensure_snell_capable_core() {
+    local current_version
+
+    if ! command -v sing-box >/dev/null 2>&1; then
         return 0
     fi
 
-    current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+    current_version=$(get_sing_box_version)
 
     if [ -z "${current_version}" ]; then
-        echo -e "${YELLOW}sing-box 存在但无法执行，疑似官方二进制缺少 glibc 兼容层${RESET}"
-        read -p "$(echo -e "${YELLOW}是否现在重装官方 sing-box 二进制修复? (Y/n) ${RESET}")" confirm
-        confirm=${confirm:-Y}
-
-        case "${confirm}" in
-            y|Y)
-                install_snell_core_from_github || {
-                    echo -e "${RED}sing-box 修复失败，已中止 Snell 安装${RESET}"
-                    return 1
-                }
-                ;;
-            *)
-                echo -e "${YELLOW}已取消修复，中止 Snell 安装${RESET}"
+        echo -e "${YELLOW}sing-box 存在但无法执行，疑似官方二进制缺少 glibc 兼容层${RESET}" >&2
+        if confirm_yes_default "${YELLOW}" "是否现在重装官方 sing-box 二进制修复?"; then
+            install_snell_core_from_github || {
+                echo -e "${RED}sing-box 修复失败，已中止 Snell 安装${RESET}" >&2
                 return 1
-                ;;
-        esac
+            }
+        else
+            echo -e "${YELLOW}已取消修复，中止 Snell 安装${RESET}"
+            return 1
+        fi
 
-        current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+        current_version=$(get_sing_box_version)
 
         if [ -n "${current_version}" ]; then
             return 0
         fi
 
-        echo -e "${RED}sing-box 修复后仍无法执行，已中止 Snell 安装${RESET}"
+        echo -e "${RED}sing-box 修复后仍无法执行，已中止 Snell 安装${RESET}" >&2
         return 1
     fi
 
-    oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
-
-    if [ "${oldest}" = "1.14.0" ]; then
+    if is_version_at_least "${current_version}" "1.14.0"; then
         return 0
     fi
 
-    echo -e "${YELLOW}当前 sing-box ${current_version} 不支持 Snell v6，需要升级到 1.14.0 以上${RESET}"
-    read -p "$(echo -e "${YELLOW}是否现在升级 sing-box 核心? (Y/n) ${RESET}")" confirm
-    confirm=${confirm:-Y}
+    echo -e "${YELLOW}当前 sing-box ${current_version} 不支持 Snell v6，需要升级到 1.14.0 以上${RESET}" >&2
+    if confirm_yes_default "${YELLOW}" "是否现在升级 sing-box 核心?"; then
+        if [ "${IS_ALPINE}" -eq 1 ]; then
+            install_snell_core_from_github || {
+                echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}" >&2
+                return 1
+            }
+        else
+            install_sing_box_deb || {
+                echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}" >&2
+                return 1
+            }
+        fi
+    else
+        echo -e "${YELLOW}已取消升级，中止 Snell 安装${RESET}"
+        return 1
+    fi
 
-    case "${confirm}" in
-        y|Y)
-            if [ "$IS_ALPINE" -eq 1 ]; then
-                install_snell_core_from_github || {
-                    echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
-                    return 1
-                }
-            else
-                bash <(curl -fsSL https://sing-box.app/deb-install.sh) || {
-                    echo -e "${RED}sing-box 升级失败，已中止 Snell 安装${RESET}"
-                    return 1
-                }
-            fi
-            ;;
-        *)
-            echo -e "${YELLOW}已取消升级，中止 Snell 安装${RESET}"
-            return 1
-            ;;
-    esac
+    current_version=$(get_sing_box_version)
 
-    current_version=$(sing-box version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
-    oldest=$(printf '%s\n%s\n' "1.14.0" "${current_version}" | sort -V | head -n1)
-
-    if [ "${oldest}" != "1.14.0" ]; then
-        echo -e "${RED}升级后 sing-box version 实际输出:${RESET}"
-        sing-box version 2>&1 | head -n3
-        echo -e "${RED}升级后版本 ${current_version} 仍低于 1.14.0，已中止 Snell 安装${RESET}"
+    if ! is_version_at_least "${current_version}" "1.14.0"; then
+        echo -e "${RED}升级后 sing-box version 实际输出:${RESET}" >&2
+        sing-box version 2>&1 | head -n3 >&2
+        echo -e "${RED}升级后版本 ${current_version} 仍低于 1.14.0，已中止 Snell 安装${RESET}" >&2
         return 1
     fi
 
@@ -2142,20 +2157,20 @@ write_snell_client() {
     {
         echo -e "${PURPLE}=============== 明文参数 ===============${RESET}"
         echo "节点类型      : Snell v6"
-        echo "服务器IP      : ${host_ip}"
+        echo "服务器IP      : ${HOST_IP}"
         echo "监听端口      : ${snell_port} (TCP)"
         echo "PSK           : ${snell_psk}"
         echo "流量整形模式  : ${snell_mode}"
         echo "UDP           : 走 UDP-over-TCP，无需单独放行 UDP 端口"
 
         echo -e "\n${GREEN}=============== Sub-Store ===============${RESET}"
-        echo -e "${YELLOW}${ip_country}-Snell = snell,${host_ip},${snell_port},\"${snell_psk}\",version=6,udp=true,block-quic=true${RESET}"
+        echo -e "${YELLOW}${IP_COUNTRY}-Snell = snell,${HOST_IP},${snell_port},\"${snell_psk}\",version=6,udp=true,block-quic=true${RESET}"
 
         echo -e "\n${CYAN}=============== Clash Meta / Mihomo ===============${RESET}"
         cat << EOF
-  - name: ${ip_country}-Snell
+  - name: ${IP_COUNTRY}-Snell
     type: snell
-    server: ${host_ip}
+    server: ${HOST_IP}
     port: ${snell_port}
     psk: ${snell_psk}
     version: "6"
@@ -2166,8 +2181,8 @@ EOF
         cat << EOF
 {
   "type": "snell",
-  "tag": "${ip_country}-Snell",
-  "server": "${host_ip}",
+  "tag": "${IP_COUNTRY}-Snell",
+  "server": "${HOST_IP}",
   "server_port": ${snell_port},
   "version": 6,
   "psk": "${snell_psk}"
@@ -2177,6 +2192,8 @@ EOF
 }
 
 install_snell_protocol() {
+    local snell_port snell_mode snell_psk
+
     if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
         echo -e "${YELLOW}Snell 已存在，跳过安装${RESET}"
         return
@@ -2186,14 +2203,14 @@ install_snell_protocol() {
 
     snell_port=$(get_valid_port "请输入 Snell TCP 监听端口 (默认随机，回车确认): ")
 
-    read -p "请输入 Snell v6 流量整形模式 default/unshaped/unsafe-raw (默认: default): " snell_mode
+    read -r -p "请输入 Snell v6 流量整形模式 default/unshaped/unsafe-raw (默认: default): " snell_mode
     snell_mode=${snell_mode:-default}
 
     case "${snell_mode}" in
         default|unshaped|unsafe-raw)
             ;;
         *)
-            echo -e "${YELLOW}无效的模式，已改用 default${RESET}"
+            echo -e "${YELLOW}无效的模式，已改用 default${RESET}" >&2
             snell_mode="default"
             ;;
     esac
@@ -2206,11 +2223,11 @@ install_snell_protocol() {
     write_snell_fragment
     write_snell_client
 
-    PROTOCOL_CHANGED=1
+    protocol_changed=1
 }
 
 install_hy2_protocol() {
-    local enable_hop
+    local enable_hop hy2_port hy2_up_mbps hy2_down_mbps hy2_sni hy2_hop_enabled hy2_hop_range hy2_hop_interval hy2_password hy2_obfs_password
 
     if [ -f "${HY2_FRAGMENT_FILE}" ]; then
         echo -e "${YELLOW}Hysteria2 已存在，跳过安装${RESET}"
@@ -2221,10 +2238,10 @@ install_hy2_protocol() {
     hy2_up_mbps=$(get_valid_mbps "请输入 HY2 上行带宽 Mbps (默认 1000): " 1000)
     hy2_down_mbps=$(get_valid_mbps "请输入 HY2 下行带宽 Mbps (默认 1000): " 1000)
 
-    read -p "请输入 HY2 TLS SNI (默认: www.postgresql.org): " hy2_sni
+    read -r -p "请输入 HY2 TLS SNI (默认: www.postgresql.org): " hy2_sni
     hy2_sni=${hy2_sni:-www.postgresql.org}
 
-    read -p "是否启用 HY2 端口跳跃? (y/N): " enable_hop
+    read -r -p "是否启用 HY2 端口跳跃? (y/N): " enable_hop
     case "${enable_hop}" in
         y|Y)
             hy2_hop_enabled=true
@@ -2252,11 +2269,12 @@ install_hy2_protocol() {
         echo -e "${YELLOW}已保存 HY2 端口跳跃配置，但未修改防火墙规则。需要时请在主菜单执行防火墙检测/自动放行。${RESET}"
     fi
 
-    PROTOCOL_CHANGED=1
+    protocol_changed=1
 }
 
 install_protocols() {
-    PROTOCOL_CHANGED=0
+    local protocol_changed=0
+    local protocol
 
     install_sing_box_binary
     prompt_log_preference_if_unset
@@ -2280,7 +2298,7 @@ install_protocols() {
         esac
     done
 
-    if [ "${PROTOCOL_CHANGED}" -eq 1 ]; then
+    if [ "${protocol_changed}" -eq 1 ]; then
         render_config
         render_client_config
         reload_sing_box_service
@@ -2293,90 +2311,85 @@ install_protocols() {
     fi
 }
 
+perform_uninstall_sing_box() {
+    echo -e "${CYAN}正在卸载 sing-box${RESET}"
+    restore_managed_firewall_rules
+
+    if [ "${IS_ALPINE}" -eq 1 ]; then
+        rc-service "${SERVICE_NAME}" stop || echo -e "${RED}停止 sing-box 服务失败。${RESET}" >&2
+        rc-update del "${SERVICE_NAME}" default || echo -e "${RED}禁用 sing-box 服务失败。${RESET}" >&2
+        apk del sing-box || echo -e "${YELLOW}无法通过 apk 卸载 sing-box。${RESET}" >&2
+    else
+        systemctl stop "${SERVICE_NAME}" || echo -e "${RED}停止 sing-box 服务失败。${RESET}" >&2
+        systemctl disable "${SERVICE_NAME}" || echo -e "${RED}禁用 sing-box 服务失败。${RESET}" >&2
+        dpkg --purge sing-box || echo -e "${YELLOW}可能未通过 apt 安装，跳过 dpkg 卸载。${RESET}" >&2
+        systemctl daemon-reload
+    fi
+
+    rm -rf "${CONFIG_DIR}"
+    rm -f /var/log/sing-box.log*
+    rm -f /etc/logrotate.d/sing-box
+
+    if [ -f "/usr/local/bin/sing-box" ]; then
+        rm /usr/local/bin/sing-box
+    fi
+
+    echo -e "${GREEN}sing-box 卸载成功${RESET}"
+}
+
 uninstall_sing_box() {
-    read -p "$(echo -e "${RED}确定要卸载 sing-box 并删除全部协议配置吗? (Y/n) ${RESET}")" choice
-    choice=${choice:-Y}
-    case "${choice}" in
-        y|Y)
-            echo -e "${CYAN}正在卸载 sing-box${RESET}"
-            restore_managed_firewall_rules
-
-            if [ "$IS_ALPINE" -eq 1 ]; then
-                rc-service "${SERVICE_NAME}" stop || echo -e "${RED}停止 sing-box 服务失败。${RESET}"
-                rc-update del "${SERVICE_NAME}" default || echo -e "${RED}禁用 sing-box 服务失败。${RESET}"
-                apk del sing-box || echo -e "${YELLOW}无法通过 apk 卸载 sing-box。${RESET}"
-            else
-                systemctl stop "${SERVICE_NAME}" || echo -e "${RED}停止 sing-box 服务失败。${RESET}"
-                systemctl disable "${SERVICE_NAME}" || echo -e "${RED}禁用 sing-box 服务失败。${RESET}"
-                dpkg --purge sing-box || echo -e "${YELLOW}可能未通过 apt 安装，跳过 dpkg 卸载。${RESET}"
-                systemctl daemon-reload
-            fi
-
-            rm -rf "${CONFIG_DIR}"
-            rm -f /var/log/sing-box.log*
-            rm -f /etc/logrotate.d/sing-box
-
-            if [ -f "/usr/local/bin/sing-box" ]; then
-                rm /usr/local/bin/sing-box
-            fi
-
-            echo -e "${GREEN}sing-box 卸载成功${RESET}"
-            ;;
-        *)
-            echo -e "${YELLOW}已取消卸载操作${RESET}"
-            ;;
-    esac
+    if confirm_yes_default "${RED}" "确定要卸载 sing-box 并删除全部协议配置吗?"; then
+        perform_uninstall_sing_box
+    else
+        echo -e "${YELLOW}已取消卸载操作${RESET}"
+    fi
 }
 
 has_any_protocol_fragment() {
     [ -f "${REALITY_FRAGMENT_FILE}" ] || [ -f "${HY2_FRAGMENT_FILE}" ] || [ -f "${SHADOWTLS_FRAGMENT_FILE}" ] || [ -f "${SNELL_FRAGMENT_FILE}" ]
 }
 
+remove_single_protocol() {
+    local protocol=$1
+    local fragment_file label
+
+    fragment_file=$(protocol_fragment_file "${protocol}") || return 1
+    label=$(protocol_label "${protocol}")
+
+    if [ ! -f "${fragment_file}" ]; then
+        echo -e "${YELLOW}${label} 未安装，跳过删除${RESET}"
+        return 1
+    fi
+
+    case "${protocol}" in
+        reality)
+            rm -f "${REALITY_FRAGMENT_FILE}" "${REALITY_CLIENT_FILE}"
+            ;;
+        shadowtls)
+            rm -f "${SHADOWTLS_FRAGMENT_FILE}" "${SHADOWTLS_CLIENT_FILE}"
+            ;;
+        hy2)
+            disable_hy2_port_hopping_runtime
+            rm -f "${HY2_FRAGMENT_FILE}" "${HY2_CLIENT_FILE}" "${HY2_STATE_FILE}" "${HY2_CERT_FILE}" "${HY2_KEY_FILE}"
+            ;;
+        snell)
+            rm -f "${SNELL_FRAGMENT_FILE}" "${SNELL_CLIENT_FILE}" "${SNELL_STATE_FILE}"
+            ;;
+    esac
+
+    echo -e "${GREEN}已删除 ${label} 协议配置${RESET}"
+}
+
 remove_protocols() {
     local removed=0
+    local protocol
 
     import_existing_protocols
 
     for protocol in "$@"; do
-        case "${protocol}" in
-            reality)
-                if [ -f "${REALITY_FRAGMENT_FILE}" ]; then
-                    rm -f "${REALITY_FRAGMENT_FILE}" "${REALITY_CLIENT_FILE}"
-                    removed=1
-                    echo -e "${GREEN}已删除 VLESS Reality 协议配置${RESET}"
-                else
-                    echo -e "${YELLOW}VLESS Reality 未安装，跳过删除${RESET}"
-                fi
-                ;;
-            shadowtls)
-                if [ -f "${SHADOWTLS_FRAGMENT_FILE}" ]; then
-                    rm -f "${SHADOWTLS_FRAGMENT_FILE}" "${SHADOWTLS_CLIENT_FILE}"
-                    removed=1
-                    echo -e "${GREEN}已删除 ShadowTLS 协议配置${RESET}"
-                else
-                    echo -e "${YELLOW}ShadowTLS 未安装，跳过删除${RESET}"
-                fi
-                ;;
-            hy2)
-                if [ -f "${HY2_FRAGMENT_FILE}" ]; then
-                    disable_hy2_port_hopping_runtime
-                    rm -f "${HY2_FRAGMENT_FILE}" "${HY2_CLIENT_FILE}" "${HY2_STATE_FILE}" "${HY2_CERT_FILE}" "${HY2_KEY_FILE}"
-                    removed=1
-                    echo -e "${GREEN}已删除 Hysteria2 协议配置${RESET}"
-                else
-                    echo -e "${YELLOW}Hysteria2 未安装，跳过删除${RESET}"
-                fi
-                ;;
-            snell)
-                if [ -f "${SNELL_FRAGMENT_FILE}" ]; then
-                    rm -f "${SNELL_FRAGMENT_FILE}" "${SNELL_CLIENT_FILE}" "${SNELL_STATE_FILE}"
-                    removed=1
-                    echo -e "${GREEN}已删除 Snell 协议配置${RESET}"
-                else
-                    echo -e "${YELLOW}Snell 未安装，跳过删除${RESET}"
-                fi
-                ;;
-        esac
+        if remove_single_protocol "${protocol}"; then
+            removed=1
+        fi
     done
 
     if [ "${removed}" -eq 0 ]; then
@@ -2391,85 +2404,49 @@ remove_protocols() {
         echo -e "${GREEN}剩余协议配置已生效${RESET}"
         show_client_summary
     else
-        read -p "$(echo -e "${YELLOW}已没有剩余协议，是否同时卸载 sing-box 服务与配置? (Y/n) ${RESET}")" cleanup_choice
-        cleanup_choice=${cleanup_choice:-Y}
-        case "${cleanup_choice}" in
-            y|Y)
-                choice=Y
-                echo -e "${CYAN}正在卸载 sing-box${RESET}"
-                restore_managed_firewall_rules
-                if [ "$IS_ALPINE" -eq 1 ]; then
-                    rc-service "${SERVICE_NAME}" stop || echo -e "${RED}停止 sing-box 服务失败。${RESET}"
-                    rc-update del "${SERVICE_NAME}" default || echo -e "${RED}禁用 sing-box 服务失败。${RESET}"
-                    apk del sing-box || echo -e "${YELLOW}无法通过 apk 卸载 sing-box。${RESET}"
-                else
-                    systemctl stop "${SERVICE_NAME}" || echo -e "${RED}停止 sing-box 服务失败。${RESET}"
-                    systemctl disable "${SERVICE_NAME}" || echo -e "${RED}禁用 sing-box 服务失败。${RESET}"
-                    dpkg --purge sing-box || echo -e "${YELLOW}可能未通过 apt 安装，跳过 dpkg 卸载。${RESET}"
-                    systemctl daemon-reload
-                fi
-                rm -rf "${CONFIG_DIR}"
-                rm -f /var/log/sing-box.log*
-                rm -f /etc/logrotate.d/sing-box
-                if [ -f "/usr/local/bin/sing-box" ]; then
-                    rm /usr/local/bin/sing-box
-                fi
-                echo -e "${GREEN}sing-box 卸载成功${RESET}"
-                ;;
-            *)
-                render_config
-                render_client_config
-                stop_sing_box
-                echo -e "${YELLOW}已保留 sing-box，当前没有启用任何协议${RESET}"
-                ;;
-        esac
+        if confirm_yes_default "${YELLOW}" "已没有剩余协议，是否同时卸载 sing-box 服务与配置?"; then
+            perform_uninstall_sing_box
+        else
+            render_config
+            render_client_config
+            stop_sing_box
+            echo -e "${YELLOW}已保留 sing-box，当前没有启用任何协议${RESET}"
+        fi
+    fi
+}
+
+run_sing_box_service_action() {
+    local action=$1
+    local action_label=$2
+    local service_rc=0
+
+    if [ "${IS_ALPINE}" -eq 1 ]; then
+        rc-service "${SERVICE_NAME}" "${action}" || service_rc=1
+    else
+        systemctl "${action}" "${SERVICE_NAME}" || service_rc=1
+    fi
+
+    if [ "${service_rc}" -eq 0 ]; then
+        echo -e "${GREEN}${SERVICE_NAME} 服务成功${action_label}${RESET}"
+    else
+        echo -e "${RED}${SERVICE_NAME} 服务${action_label}失败${RESET}" >&2
     fi
 }
 
 start_sing_box() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
-        rc-service "${SERVICE_NAME}" start
-    else
-        systemctl start "${SERVICE_NAME}"
-    fi
-
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}${SERVICE_NAME} 服务成功启动${RESET}"
-    else
-        echo -e "${RED}${SERVICE_NAME} 服务启动失败${RESET}"
-    fi
+    run_sing_box_service_action "start" "启动"
 }
 
 stop_sing_box() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
-        rc-service "${SERVICE_NAME}" stop
-    else
-        systemctl stop "${SERVICE_NAME}"
-    fi
-
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}${SERVICE_NAME} 服务成功停止${RESET}"
-    else
-        echo -e "${RED}${SERVICE_NAME} 服务停止失败${RESET}"
-    fi
+    run_sing_box_service_action "stop" "停止"
 }
 
 restart_sing_box() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
-        rc-service "${SERVICE_NAME}" restart
-    else
-        systemctl restart "${SERVICE_NAME}"
-    fi
-
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}${SERVICE_NAME} 服务成功重启${RESET}"
-    else
-        echo -e "${RED}${SERVICE_NAME} 服务重启失败${RESET}"
-    fi
+    run_sing_box_service_action "restart" "重启"
 }
 
 status_sing_box() {
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if [ "${IS_ALPINE}" -eq 1 ]; then
         rc-service "${SERVICE_NAME}" status
     else
         systemctl status "${SERVICE_NAME}"
@@ -2483,7 +2460,7 @@ log_sing_box() {
     fi
 
     echo -e "${CYAN}正在实时监控 sing-box 日志，按 Ctrl+C 退出${RESET}"
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if [ "${IS_ALPINE}" -eq 1 ]; then
         if [ -f /var/log/sing-box.log ]; then
             tail -f /var/log/sing-box.log
         else
@@ -2565,7 +2542,7 @@ show_client_summary() {
         show_protocol_client_summary "ShadowTLS + Shadowsocks" "${SHADOWTLS_CLIENT_FILE}" "ss://"
         show_protocol_client_summary "Snell v6" "${SNELL_CLIENT_FILE}" "snell://"
     else
-        echo -e "${YELLOW}配置文件不存在: ${CLIENT_CONFIG_FILE}${RESET}"
+        echo -e "${YELLOW}配置文件不存在: ${CLIENT_CONFIG_FILE}${RESET}" >&2
     fi
 }
 
@@ -2574,7 +2551,7 @@ show_full_client_config() {
         clear
         cat "${CLIENT_CONFIG_FILE}"
     else
-        echo -e "${YELLOW}配置文件不存在: ${CLIENT_CONFIG_FILE}${RESET}"
+        echo -e "${YELLOW}配置文件不存在: ${CLIENT_CONFIG_FILE}${RESET}" >&2
     fi
 }
 
@@ -2583,7 +2560,7 @@ client_config_menu() {
     render_client_config
 
     if [ ! -f "${CLIENT_CONFIG_FILE}" ]; then
-        echo -e "${YELLOW}配置文件不存在: ${CLIENT_CONFIG_FILE}${RESET}"
+        echo -e "${YELLOW}配置文件不存在: ${CLIENT_CONFIG_FILE}${RESET}" >&2
         return
     fi
 
@@ -2606,6 +2583,7 @@ client_config_menu() {
 configure_upstream_outbound() {
     local selected_type=$1
     local current_type="" current_server="" current_port="" current_username="" current_password=""
+    local upstream_type="" upstream_server="" upstream_port="" upstream_username="" upstream_password=""
     local label input_username input_password
 
     if load_upstream_outbound; then
@@ -2669,7 +2647,7 @@ configure_upstream_outbound() {
     if is_sing_box_running; then
         echo -e "${GREEN}上游出站已启用: $(upstream_type_label "${upstream_type}") -> ${upstream_server}:${upstream_port}${RESET}"
     else
-        echo -e "${RED}配置已写入，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
+        echo -e "${RED}配置已写入，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}" >&2
     fi
 }
 
@@ -2708,12 +2686,13 @@ upstream_outbound_menu() {
             SKIP_PAUSE=1
             return
             ;;
-        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" ;;
+        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" >&2 ;;
     esac
 }
 
 apply_log_setting() {
     local enabled=$1
+    local log_enabled
 
     log_enabled="${enabled}"
     write_log_state
@@ -2735,8 +2714,6 @@ apply_log_setting() {
 }
 
 logging_menu() {
-    local confirm
-
     menu_reset
     if is_log_enabled; then
         menu_add "1" "关闭日志并删除历史日志" "写入 log.disabled=true，并清理 sing-box 历史日志。"
@@ -2750,12 +2727,11 @@ logging_menu() {
     case "${MENU_CHOICE}" in
         1)
             if is_log_enabled; then
-                read -r -p "$(echo -e "${YELLOW}确认关闭日志并删除历史日志吗? (Y/n) ${RESET}")" confirm
-                confirm=${confirm:-Y}
-                case "${confirm}" in
-                    y|Y) apply_log_setting "false" ;;
-                    *) echo -e "${YELLOW}已取消关闭日志${RESET}" ;;
-                esac
+                if confirm_yes_default "${YELLOW}" "确认关闭日志并删除历史日志吗?"; then
+                    apply_log_setting "false"
+                else
+                    echo -e "${YELLOW}已取消关闭日志${RESET}"
+                fi
             else
                 apply_log_setting "true"
             fi
@@ -2767,29 +2743,51 @@ logging_menu() {
             SKIP_PAUSE=1
             return
             ;;
-        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" ;;
+        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" >&2 ;;
     esac
 }
 
+# 统一修改菜单中重复的 SNI 输入提示与空值回退
+prompt_new_sni() {
+    local label=$1
+    local default=$2
+    local input
+
+    read -r -p "请输入新的 ${label} (默认: ${default}): " input
+    printf '%s' "${input:-${default}}"
+}
+
+apply_config_and_restart() {
+    local failure_message=$1
+
+    render_config
+    render_client_config
+    restart_sing_box
+    if ! is_sing_box_running; then
+        echo -e "${RED}${failure_message}${RESET}" >&2
+        return 1
+    fi
+}
+
 change_reality_port() {
-    local port_choice current_sni new_port new_sni tmp_file tmp_client_file
+    local port_choice current_port current_sni new_port new_sni tmp_file tmp_client_file
 
     import_existing_protocols
 
     if [ ! -f "${REALITY_FRAGMENT_FILE}" ]; then
-        echo -e "${RED}VLESS Reality 尚未安装${RESET}"
+        echo -e "${RED}VLESS Reality 尚未安装${RESET}" >&2
         return
     fi
 
     check_ss_command
 
-    current_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${REALITY_FRAGMENT_FILE}")
+    current_port=$(extract_fragment_listen_port "${REALITY_FRAGMENT_FILE}")
     if [ -z "${current_port}" ]; then
-        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}"
+        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}" >&2
         return
     fi
 
-    current_sni=$(awk -F\" '/"server_name"[[:space:]]*:/ { print $4; exit }' "${REALITY_FRAGMENT_FILE}")
+    current_sni=$(extract_json_string_field "server_name" "${REALITY_FRAGMENT_FILE}")
     current_sni=${current_sni:-www.postgresql.org}
 
     menu_reset
@@ -2808,20 +2806,18 @@ change_reality_port() {
             new_port=$(get_valid_port "请输入新的 VLESS 监听端口 (默认随机，回车确认): ")
             ;;
         2)
-            read -p "请输入新的 Reality 伪装域名 SNI (默认: ${current_sni}): " new_sni
-            new_sni=${new_sni:-${current_sni}}
+            new_sni=$(prompt_new_sni "Reality 伪装域名 SNI" "${current_sni}")
             ;;
         3)
             new_port=$(get_valid_port "请输入新的 VLESS 监听端口 (默认随机，回车确认): ")
-            read -p "请输入新的 Reality 伪装域名 SNI (默认: ${current_sni}): " new_sni
-            new_sni=${new_sni:-${current_sni}}
+            new_sni=$(prompt_new_sni "Reality 伪装域名 SNI" "${current_sni}")
             ;;
         0)
             SKIP_PAUSE=1
             return
             ;;
         *)
-            echo -e "${RED}无效的选项，已取消修改${RESET}"
+            echo -e "${RED}无效的选项，已取消修改${RESET}" >&2
             return
             ;;
     esac
@@ -2847,7 +2843,7 @@ change_reality_port() {
         }
         { print }
     ' "${REALITY_FRAGMENT_FILE}" > "${tmp_file}"; then
-        echo -e "${RED}更新服务端配置失败${RESET}"
+        echo -e "${RED}更新服务端配置失败${RESET}" >&2
         rm -f "${tmp_file}"
         return
     fi
@@ -2871,42 +2867,37 @@ change_reality_port() {
                 print
             }
         ' "${REALITY_CLIENT_FILE}" > "${tmp_client_file}"; then
-            echo -e "${RED}更新客户端配置失败${RESET}"
+            echo -e "${RED}更新客户端配置失败${RESET}" >&2
             rm -f "${tmp_client_file}"
             return
         fi
         mv "${tmp_client_file}" "${REALITY_CLIENT_FILE}"
     else
-        echo -e "${YELLOW}客户端配置文件不存在，已仅更新服务端配置${RESET}"
+        echo -e "${YELLOW}客户端配置文件不存在，已仅更新服务端配置${RESET}" >&2
     fi
 
-    render_config
-    render_client_config
-    restart_sing_box
-    if is_sing_box_running; then
+    if apply_config_and_restart "端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志"; then
         echo -e "${GREEN}VLESS 监听端口已从 ${current_port} 修改为 ${new_port}${RESET}"
         echo -e "${GREEN}Reality 伪装域名已从 ${current_sni} 修改为 ${new_sni}${RESET}"
         show_client_summary
-    else
-        echo -e "${RED}端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
     fi
 }
 
 change_snell_port() {
-    local current_port new_port tmp_file
+    local current_port new_port tmp_file snell_port snell_psk snell_mode
 
     import_existing_protocols
 
     if [ ! -f "${SNELL_FRAGMENT_FILE}" ]; then
-        echo -e "${RED}Snell 尚未安装${RESET}"
+        echo -e "${RED}Snell 尚未安装${RESET}" >&2
         return
     fi
 
     check_ss_command
 
-    current_port=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "${SNELL_FRAGMENT_FILE}")
+    current_port=$(extract_fragment_listen_port "${SNELL_FRAGMENT_FILE}")
     if [ -z "${current_port}" ]; then
-        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}"
+        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}" >&2
         return
     fi
 
@@ -2925,50 +2916,45 @@ change_snell_port() {
         }
         { print }
     ' "${SNELL_FRAGMENT_FILE}" > "${tmp_file}"; then
-        echo -e "${RED}更新服务端配置失败${RESET}"
+        echo -e "${RED}更新服务端配置失败${RESET}" >&2
         rm -f "${tmp_file}"
         return
     fi
     mv "${tmp_file}" "${SNELL_FRAGMENT_FILE}"
 
     snell_port=${new_port}
-    snell_psk=$(awk -F\" '/"psk"[[:space:]]*:/ { print $4; exit }' "${SNELL_FRAGMENT_FILE}")
-    snell_mode=$(awk -F\" '/"mode"[[:space:]]*:/ { print $4; exit }' "${SNELL_FRAGMENT_FILE}")
+    snell_psk=$(extract_json_string_field "psk" "${SNELL_FRAGMENT_FILE}")
+    snell_mode=$(extract_json_string_field "mode" "${SNELL_FRAGMENT_FILE}")
     write_snell_state
     set_current_host_info
     write_snell_client
 
-    render_config
-    render_client_config
-    restart_sing_box
-    if is_sing_box_running; then
+    if apply_config_and_restart "端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志"; then
         echo -e "${GREEN}Snell 监听端口已从 ${current_port} 修改为 ${new_port}${RESET}"
         echo -e "${YELLOW}端口变更不会自动修改防火墙，请到防火墙菜单执行自动放行${RESET}"
         show_client_summary
-    else
-        echo -e "${RED}端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
     fi
 }
 
 change_shadowtls_port() {
+    local current_ports current_ssport current_sport current_sni port_choice new_sport new_ssport new_sni tmp_file tmp_client_file
+
     import_existing_protocols
 
     if [ ! -f "${SHADOWTLS_FRAGMENT_FILE}" ]; then
-        echo -e "${RED}ShadowTLS 尚未安装${RESET}"
+        echo -e "${RED}ShadowTLS 尚未安装${RESET}" >&2
         return
     fi
 
     check_ss_command
 
-    current_ports=$(awk -F: '/"listen_port"/ { gsub(/[^0-9]/, "", $2); ports[++i]=$2 } END { if (i >= 2) print ports[1], ports[2] }' "${SHADOWTLS_FRAGMENT_FILE}")
-    set -- ${current_ports}
-    current_ssport=$1
-    current_sport=$2
-    current_sni=$(awk -F\" '/"server"[[:space:]]*:/ { print $4; exit }' "${SHADOWTLS_FRAGMENT_FILE}")
+    current_ports=$(extract_shadowtls_ports)
+    IFS=' ' read -r current_ssport current_sport <<< "${current_ports}" || true
+    current_sni=$(extract_json_string_field "server" "${SHADOWTLS_FRAGMENT_FILE}")
     current_sni=${current_sni:-www.postgresql.org}
 
     if [ -z "${current_ssport}" ] || [ -z "${current_sport}" ]; then
-        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}"
+        echo -e "${RED}无法从配置文件中读取当前监听端口${RESET}" >&2
         return
     fi
 
@@ -2998,27 +2984,25 @@ change_shadowtls_port() {
             new_ssport=$(get_valid_port "请输入新的 Shadowsocks 监听端口 (默认随机，回车确认): ")
             ;;
         4)
-            read -p "请输入新的 ShadowTLS 伪装域名 SNI (默认: ${current_sni}): " new_sni
-            new_sni=${new_sni:-${current_sni}}
+            new_sni=$(prompt_new_sni "ShadowTLS 伪装域名 SNI" "${current_sni}")
             ;;
         5)
             new_sport=$(get_valid_port "请输入新的 ShadowTLS 监听端口 (默认随机，回车确认): ")
             new_ssport=$(get_valid_port "请输入新的 Shadowsocks 监听端口 (默认随机，回车确认): ")
-            read -p "请输入新的 ShadowTLS 伪装域名 SNI (默认: ${current_sni}): " new_sni
-            new_sni=${new_sni:-${current_sni}}
+            new_sni=$(prompt_new_sni "ShadowTLS 伪装域名 SNI" "${current_sni}")
             ;;
         0)
             SKIP_PAUSE=1
             return
             ;;
         *)
-            echo -e "${RED}无效的选项，已取消修改${RESET}"
+            echo -e "${RED}无效的选项，已取消修改${RESET}" >&2
             return
             ;;
     esac
 
     if [ "${new_sport}" = "${new_ssport}" ]; then
-        echo -e "${RED}ShadowTLS 和 Shadowsocks 端口不能相同，已取消修改${RESET}"
+        echo -e "${RED}ShadowTLS 和 Shadowsocks 端口不能相同，已取消修改${RESET}" >&2
         return
     fi
 
@@ -3043,7 +3027,7 @@ change_shadowtls_port() {
         }
         { print }
     ' "${SHADOWTLS_FRAGMENT_FILE}" > "${tmp_file}"; then
-        echo -e "${RED}更新服务端配置失败${RESET}"
+        echo -e "${RED}更新服务端配置失败${RESET}" >&2
         rm -f "${tmp_file}"
         return
     fi
@@ -3075,35 +3059,31 @@ change_shadowtls_port() {
                 print
             }
         ' "${SHADOWTLS_CLIENT_FILE}" > "${tmp_client_file}"; then
-            echo -e "${RED}更新客户端配置失败${RESET}"
+            echo -e "${RED}更新客户端配置失败${RESET}" >&2
             rm -f "${tmp_client_file}"
             return
         fi
         mv "${tmp_client_file}" "${SHADOWTLS_CLIENT_FILE}"
     else
-        echo -e "${YELLOW}客户端配置文件不存在，已仅更新服务端配置${RESET}"
+        echo -e "${YELLOW}客户端配置文件不存在，已仅更新服务端配置${RESET}" >&2
     fi
 
-    render_config
-    render_client_config
-    restart_sing_box
-    if is_sing_box_running; then
+    if apply_config_and_restart "端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志"; then
         echo -e "${GREEN}ShadowTLS 端口已从 ${current_sport} 修改为 ${new_sport}${RESET}"
         echo -e "${GREEN}Shadowsocks 端口已从 ${current_ssport} 修改为 ${new_ssport}${RESET}"
         echo -e "${GREEN}ShadowTLS 伪装域名已从 ${current_sni} 修改为 ${new_sni}${RESET}"
         show_client_summary
-    else
-        echo -e "${RED}端口已写入配置，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
     fi
 }
 
 change_hy2_port() {
     local port_choice enable_hop old_port old_sni old_hop_enabled old_hop_range old_hop_interval regen_hy2_cert
+    local hy2_port hy2_password hy2_obfs_password hy2_sni hy2_up_mbps hy2_down_mbps hy2_hop_enabled hy2_hop_range hy2_hop_interval
 
     import_existing_protocols
 
     if [ ! -f "${HY2_FRAGMENT_FILE}" ]; then
-        echo -e "${RED}Hysteria2 尚未安装${RESET}"
+        echo -e "${RED}Hysteria2 尚未安装${RESET}" >&2
         return
     fi
 
@@ -3138,22 +3118,20 @@ change_hy2_port() {
             hy2_port=$(get_valid_port "请输入新的 HY2 UDP 监听端口 (默认随机，回车确认): ")
             ;;
         2)
-            read -p "请输入新的 HY2 TLS SNI (默认: ${hy2_sni}): " hy2_sni
-            hy2_sni=${hy2_sni:-${old_sni}}
+            hy2_sni=$(prompt_new_sni "HY2 TLS SNI" "${old_sni}")
             ;;
         3)
             ;;
         4)
             hy2_port=$(get_valid_port "请输入新的 HY2 UDP 监听端口 (默认随机，回车确认): ")
-            read -p "请输入新的 HY2 TLS SNI (默认: ${hy2_sni}): " hy2_sni
-            hy2_sni=${hy2_sni:-${old_sni}}
+            hy2_sni=$(prompt_new_sni "HY2 TLS SNI" "${old_sni}")
             ;;
         0)
             SKIP_PAUSE=1
             return
             ;;
         *)
-            echo -e "${RED}无效的选项，已取消修改${RESET}"
+            echo -e "${RED}无效的选项，已取消修改${RESET}" >&2
             return
             ;;
     esac
@@ -3210,22 +3188,17 @@ change_hy2_port() {
 
     echo -e "${YELLOW}HY2 配置已更新，但未修改防火墙规则。需要时请在主菜单执行防火墙检测/自动放行。${RESET}"
 
-    render_config
-    render_client_config
-    restart_sing_box
-    if is_sing_box_running; then
+    if apply_config_and_restart "配置已写入，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志"; then
         echo -e "${GREEN}Hysteria2 配置已更新${RESET}"
         if [ "${regen_hy2_cert}" -eq 1 ]; then
             echo -e "${GREEN}HY2 TLS SNI 已从 ${old_sni} 修改为 ${hy2_sni}，证书已重新生成${RESET}"
         fi
         show_client_summary
-    else
-        echo -e "${RED}配置已写入，但 ${SERVICE_NAME} 服务未成功运行，请查看状态或日志${RESET}"
     fi
 }
 
 protocol_status_text() {
-    if "$1"; then
+    if has_protocol "$1"; then
         echo -e "${GREEN}已配置${RESET}"
     else
         echo -e "${RED}未配置${RESET}"
@@ -3235,25 +3208,25 @@ protocol_status_text() {
 build_state_panel_cache() {
     local os_text core_text service_text protocol_text upstream_text log_text firewall_text
 
-    if [ "$IS_ALPINE" -eq 1 ]; then
+    if [ "${IS_ALPINE}" -eq 1 ]; then
         os_text="${YELLOW}Alpine Linux / OpenRC${RESET}"
     else
         os_text="${YELLOW}Standard Linux / systemd${RESET}"
     fi
 
-    if [ ${sing_box_installed} -eq 0 ]; then
+    if [ "${SING_BOX_INSTALLED}" -eq 0 ]; then
         core_text="${GREEN}已安装${RESET}"
     else
         core_text="${RED}未安装${RESET}"
     fi
 
-    if [ ${sing_box_running} -eq 0 ]; then
+    if [ "${SING_BOX_RUNNING}" -eq 0 ]; then
         service_text="${GREEN}运行中${RESET}"
     else
         service_text="${YELLOW}未运行${RESET}"
     fi
 
-    protocol_text="Reality $(protocol_status_text has_reality_protocol) | HY2 $(protocol_status_text has_hy2_protocol) | ShadowTLS $(protocol_status_text has_shadowtls_protocol) | Snell $(protocol_status_text has_snell_protocol)"
+    protocol_text="Reality $(protocol_status_text reality) | HY2 $(protocol_status_text hy2) | ShadowTLS $(protocol_status_text shadowtls) | Snell $(protocol_status_text snell)"
     upstream_text="$(upstream_outbound_status_text)"
     log_text="$(log_status_text)"
     firewall_text="$(firewall_backend_label)"
@@ -3427,15 +3400,21 @@ interactive_select() {
 show_menu() {
     load_startup_ip_info
     import_existing_protocols
-    is_sing_box_installed
-    sing_box_installed=$?
-    is_sing_box_running
-    sing_box_running=$?
+    if is_sing_box_installed; then
+        SING_BOX_INSTALLED=0
+    else
+        SING_BOX_INSTALLED=1
+    fi
+    if is_sing_box_running; then
+        SING_BOX_RUNNING=0
+    else
+        SING_BOX_RUNNING=1
+    fi
     build_state_panel_cache
 
     menu_reset
     MENU_NEXT_NUMBER=1
-    if [ ${sing_box_installed} -ne 0 ]; then
+    if [ "${SING_BOX_INSTALLED}" -ne 0 ]; then
         menu_add_auto "一键安装 Reality + HY2 + ShadowTLS + Snell" "推荐首次部署。自动安装 sing-box，依次配置四个协议，并在完成后输出全部节点。" "install_all"
         menu_add_auto "仅安装 VLESS Reality" "只部署 Reality，适合需要稳定 TCP + Reality 伪装的场景。" "install_reality"
         menu_add_auto "仅安装 Hysteria2" "只部署 HY2，可在安装流程中选择是否启用 UDP 端口跳跃。" "install_hy2"
@@ -3446,23 +3425,23 @@ show_menu() {
     else
         if ! has_all_protocols; then
             menu_add_auto "一键补齐缺失协议" "只安装当前缺失的协议；已存在的协议会自动跳过，不重复覆盖。" "install_all"
-            if ! has_reality_protocol; then
+            if ! has_protocol reality; then
                 menu_add_auto "安装 VLESS Reality" "新增 Reality 协议，适合稳定 TCP + Reality 伪装场景。" "install_reality"
             fi
-            if ! has_hy2_protocol; then
+            if ! has_protocol hy2; then
                 menu_add_auto "安装 Hysteria2" "新增 HY2 协议，并可选择配置 UDP 端口跳跃。" "install_hy2"
             fi
-            if ! has_shadowtls_protocol; then
+            if ! has_protocol shadowtls; then
                 menu_add_auto "安装 ShadowTLS" "新增 ShadowTLS + Shadowsocks 协议。" "install_shadowtls"
             fi
-            if ! has_snell_protocol; then
+            if ! has_protocol snell; then
                 menu_add_auto "安装 Snell v6" "新增 Snell v6 协议；核心低于 1.14 时会先升级 sing-box。" "install_snell"
             fi
         fi
 
         menu_add_auto "查看节点链接配置" "默认进入简洁摘要；完整 Clash / Sing-box / Sub-Store 配置可在二级菜单打开。" "view_config"
         menu_add_auto "配置上游出站" "可选设置 SOCKS5 / HTTP 上游；未设置时保持 direct，设置后作为 sing-box 默认出站。" "upstream_outbound"
-        if [ ${sing_box_running} -eq 0 ]; then
+        if [ "${SING_BOX_RUNNING}" -eq 0 ]; then
             menu_add_auto "停止 sing-box 服务" "停止正在运行的 sing-box 服务。" "toggle_service"
         else
             menu_add_auto "启动 sing-box 服务" "启动已安装的 sing-box 服务。" "toggle_service"
@@ -3479,11 +3458,13 @@ show_menu() {
         interactive_select "请选择操作:"
     fi
 
-    choice="${MENU_CHOICE}"
+    MAIN_CHOICE="${MENU_CHOICE}"
     echo ""
 }
 
 change_ports_menu() {
+    local change_choice
+
     menu_reset
     menu_add "1" "VLESS Reality 端口 / 伪装域名" "修改 Reality 入站监听端口或伪装域名，并同步更新客户端分享信息。"
     menu_add "2" "Hysteria2 端口 / SNI / 端口跳跃" "修改 HY2 UDP 监听端口、TLS SNI，或开启、关闭、调整端口跳跃范围。"
@@ -3503,11 +3484,13 @@ change_ports_menu() {
             SKIP_PAUSE=1
             return
             ;;
-        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" ;;
+        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" >&2 ;;
     esac
 }
 
 remove_protocols_menu() {
+    local remove_choice
+
     menu_reset
     menu_add "1" "删除 VLESS Reality" "删除 Reality 服务端片段和对应客户端信息。"
     menu_add "2" "删除 Hysteria2" "删除 HY2 配置、证书、客户端信息，并清理端口跳跃规则。"
@@ -3529,7 +3512,7 @@ remove_protocols_menu() {
             SKIP_PAUSE=1
             return
             ;;
-        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" ;;
+        *) echo -e "${RED}无效的选项，已返回主菜单${RESET}" >&2 ;;
     esac
 }
 
@@ -3545,16 +3528,16 @@ firewall_menu() {
         case "${MENU_CHOICE}" in
             1)
                 show_firewall_status
-                read -p "按 Enter 键返回防火墙菜单..."
+                read -r -p "按 Enter 键返回防火墙菜单..."
                 ;;
             2)
                 apply_current_firewall_rules
-                read -p "按 Enter 键返回防火墙菜单..."
+                read -r -p "按 Enter 键返回防火墙菜单..."
                 ;;
             3)
                 restore_managed_firewall_rules
                 echo -e "${GREEN}已复原脚本管理的防火墙规则${RESET}"
-                read -p "按 Enter 键返回防火墙菜单..."
+                read -r -p "按 Enter 键返回防火墙菜单..."
                 ;;
             0)
                 SKIP_PAUSE=1
@@ -3562,6 +3545,23 @@ firewall_menu() {
                 ;;
         esac
     done
+}
+
+# 通过统一前置守卫收敛主循环中重复的安装态校验
+run_if_installed() {
+    if [ "${SING_BOX_INSTALLED}" -eq 0 ]; then
+        "$@"
+    else
+        echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}" >&2
+    fi
+}
+
+toggle_sing_box_service() {
+    if [ "${SING_BOX_RUNNING}" -eq 0 ]; then
+        stop_sing_box
+    else
+        start_sing_box
+    fi
 }
 
 trap 'printf "\033[?25h"; echo -e "\n${RED}已取消操作${RESET}"; exit' INT
@@ -3572,7 +3572,7 @@ check_time_sync
 while true; do
     SKIP_PAUSE=0
     show_menu
-    case "${choice}" in
+    case "${MAIN_CHOICE}" in
         install_all)
             install_protocols reality hy2 shadowtls snell
             ;;
@@ -3589,95 +3589,47 @@ while true; do
             install_protocols snell
             ;;
         view_config)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                client_config_menu
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed client_config_menu
             ;;
         upstream_outbound)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                upstream_outbound_menu
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed upstream_outbound_menu
             ;;
         toggle_service)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                if [ ${sing_box_running} -eq 0 ]; then
-                    stop_sing_box
-                else
-                    start_sing_box
-                fi
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed toggle_sing_box_service
             ;;
         restart)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                restart_sing_box
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed restart_sing_box
             ;;
         status)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                status_sing_box
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed status_sing_box
             ;;
         logs)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                log_sing_box
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed log_sing_box
             ;;
         logging)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                logging_menu
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed logging_menu
             ;;
         change_ports)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                change_ports_menu
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed change_ports_menu
             ;;
         firewall)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                firewall_menu
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed firewall_menu
             ;;
         remove_protocol)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                remove_protocols_menu
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed remove_protocols_menu
             ;;
         uninstall)
-            if [ ${sing_box_installed} -eq 0 ]; then
-                uninstall_sing_box
-            else
-                echo -e "${YELLOW}当前未安装 sing-box，请先选择 1-4 完成安装。${RESET}"
-            fi
+            run_if_installed uninstall_sing_box
             ;;
         0|exit)
             echo -e "${GREEN}已退出 sing-box 管理工具${RESET}"
             exit 0
             ;;
         *)
-            echo -e "${RED}无效的选项，请重新选择${RESET}"
+            echo -e "${RED}无效的选项，请重新选择${RESET}" >&2
             ;;
     esac
     if [ "${SKIP_PAUSE:-0}" -eq 0 ]; then
-        read -p "按 Enter 键继续..."
+        read -r -p "按 Enter 键继续..."
     fi
 done
