@@ -835,14 +835,26 @@ import_existing_protocols() {
     import_existing_clients
 }
 
+# 无状态文件时按片段嗅探证书模式路径含自签文件名即 selfsigned
+vlessws_sniff_cert_mode() {
+    [ -f "${VLESSWS_FRAGMENT_FILE}" ] && grep -q '"certificate_path"' "${VLESSWS_FRAGMENT_FILE}" || return 1
+
+    if grep -q 'vlessws-selfsigned' "${VLESSWS_FRAGMENT_FILE}"; then
+        echo "selfsigned"
+    else
+        echo "custom"
+    fi
+}
+
 # 统一判定 vlessws 证书模式优先状态文件次之嗅探片段内容
 vlessws_effective_cert_mode() {
     local mode=""
+    local sniffed_mode
 
     if load_vlessws_state >/dev/null 2>&1; then
         mode=${vlessws_cert_mode:-acme}
-    elif [ -f "${VLESSWS_FRAGMENT_FILE}" ] && grep -q '"certificate_path"' "${VLESSWS_FRAGMENT_FILE}"; then
-        mode="custom"
+    elif sniffed_mode=$(vlessws_sniff_cert_mode); then
+        mode=${sniffed_mode}
     fi
 
     [ -n "${mode}" ] || mode="acme"
@@ -865,8 +877,8 @@ render_certificate_providers() {
 
     [ -n "${domain}" ] || return 0
 
-    # 自备证书模式顶层不渲染 certificate_providers 以保持配置纯净
-    if [ "$(vlessws_effective_cert_mode)" = "custom" ]; then
+    # 静态证书模式顶层不渲染 certificate_providers 以保持配置纯净
+    if [ "$(vlessws_effective_cert_mode)" != "acme" ]; then
         return 0
     fi
 
@@ -2594,6 +2606,41 @@ EOF
     return 1
 }
 
+# 每次安装都重新生成自签证书保证改域名重装后 SAN 与新域名一致
+generate_vlessws_selfsigned_cert() {
+    local cert_hash key_hash
+
+    install_package_if_missing openssl openssl
+    ensure_state_dirs
+
+    echo -e "${CYAN}正在生成 VLESS WS TLS 自签证书...${RESET}"
+    if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+        -keyout "${vlessws_key_path}" \
+        -out "${vlessws_cert_path}" \
+        -days 3650 \
+        -subj "/CN=${vlessws_domain}" \
+        -addext "subjectAltName=DNS:${vlessws_domain}" >/dev/null 2>&1; then
+        openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+            -keyout "${vlessws_key_path}" \
+            -out "${vlessws_cert_path}" \
+            -days 3650 \
+            -subj "/CN=${vlessws_domain}" >/dev/null 2>&1 || {
+            echo -e "${RED}VLESS WS TLS 自签证书生成失败${RESET}" >&2
+            return 1
+        }
+        echo -e "${YELLOW}警告：当前 openssl 过旧，自签证书未写入 SAN，客户端可能出现域名校验告警${RESET}" >&2
+    fi
+    chmod 600 "${vlessws_key_path}"
+
+    # 生成物仍按自备口径复核公钥配对防写出错误配置
+    cert_hash=$(vlessws_cert_pubkey_hash "${vlessws_cert_path}")
+    key_hash=$(vlessws_key_pubkey_hash "${vlessws_key_path}")
+    if [ -z "${cert_hash}" ] || [ "${cert_hash}" != "${key_hash}" ]; then
+        echo -e "${RED}自签证书公钥校验失败，已放弃安装${RESET}" >&2
+        return 1
+    fi
+}
+
 # 每次安装都询问证书来源并按自备流程完成存在可读与匹配校验
 prompt_vlessws_cert_source() {
     local choice cert_file key_file cert_hash key_hash
@@ -2601,7 +2648,15 @@ prompt_vlessws_cert_source() {
     echo -e "${CYAN}请选择 VLESS WS TLS 证书来源${RESET}"
     echo -e "${GRAY}1. ACME 自动签发${RESET}"
     echo -e "${GRAY}2. 自备证书文件${RESET}"
+    echo -e "${GRAY}3. 自签生成 仅限套 CDN 场景${RESET}"
     read -r -p "请选择 (默认 1，回车即可): " choice
+
+    if [ "${choice}" = "3" ]; then
+        vlessws_cert_mode="selfsigned"
+        vlessws_cert_path="${CERT_DIR}/vlessws-selfsigned.crt"
+        vlessws_key_path="${CERT_DIR}/vlessws-selfsigned.key"
+        return 0
+    fi
 
     if [ "${choice}" != "2" ]; then
         vlessws_cert_mode="acme"
@@ -2728,7 +2783,7 @@ vlessws_record_cert_rescue() {
 write_vlessws_fragment() {
     local tls_cert_fields
 
-    if [ "${vlessws_cert_mode:-acme}" = "custom" ]; then
+    if [ "${vlessws_cert_mode:-acme}" != "acme" ]; then
         tls_cert_fields="        \"certificate_path\": \"$(json_escape "${vlessws_cert_path}")\",
         \"key_path\": \"$(json_escape "${vlessws_key_path}")\""
     else
@@ -2776,6 +2831,9 @@ write_vlessws_client() {
         if [ "${vlessws_cert_mode:-acme}" = "custom" ]; then
             echo "TLS           : 自备证书 (${vlessws_cert_path})"
             echo "CF SSL 模式   : 公网 CA 证书配 Full strict，自签或 Origin CA 证书配 Full"
+        elif [ "${vlessws_cert_mode:-acme}" = "selfsigned" ]; then
+            echo "TLS           : 自签证书 仅限套 CDN 场景 直连不可用"
+            echo "CF SSL 模式   : 自签证书须配 Full 不可用 Full strict"
         else
             echo "TLS           : ACME 自动签发证书"
             echo "CF SSL 模式   : Let's Encrypt 证书兼容 Full 与 Full strict"
@@ -2852,6 +2910,12 @@ install_vlessws_protocol() {
         echo -e "${YELLOW}已取消 VLESS WS TLS 安装${RESET}"
         return 1
     }
+
+    # 自签模式现场生成证书失败即中止不写任何配置
+    if [ "${vlessws_cert_mode}" = "selfsigned" ] && ! generate_vlessws_selfsigned_cert; then
+        echo -e "${YELLOW}已取消 VLESS WS TLS 安装${RESET}"
+        return 1
+    fi
 
     # 仅 ACME 模式依赖 80 端口完成 HTTP-01 校验自备证书无需占用
     if [ "${vlessws_cert_mode}" = "acme" ] && is_port_in_use 80; then
@@ -3006,8 +3070,8 @@ perform_uninstall_sing_box() {
             return 1
         fi
     elif [ ! -f "${VLESSWS_STATE_FILE}" ] && [ -f "${VLESSWS_FRAGMENT_FILE}" ] && grep -q '"certificate_path"' "${VLESSWS_FRAGMENT_FILE}"; then
-        # 无状态文件时嗅探自备证书片段登记路径避免导入态直卸误删
-        vlessws_cert_mode="custom"
+        # 无状态文件时嗅探证书片段登记路径避免导入态直卸误删 自签可再生不登记迁出
+        vlessws_cert_mode=$(vlessws_sniff_cert_mode)
         vlessws_cert_path=$(extract_json_string_field "certificate_path" "${VLESSWS_FRAGMENT_FILE}")
         vlessws_key_path=$(extract_json_string_field "key_path" "${VLESSWS_FRAGMENT_FILE}")
         if ! vlessws_record_cert_rescue cert "${vlessws_cert_path}" || ! vlessws_record_cert_rescue key "${vlessws_key_path}"; then
@@ -3130,7 +3194,7 @@ remove_single_protocol() {
             if load_vlessws_state >/dev/null 2>&1; then
                 :
             elif [ -f "${VLESSWS_FRAGMENT_FILE}" ] && grep -q '"certificate_path"' "${VLESSWS_FRAGMENT_FILE}"; then
-                vlessws_cert_mode="custom"
+                vlessws_cert_mode=$(vlessws_sniff_cert_mode)
                 vlessws_cert_path=$(extract_json_string_field "certificate_path" "${VLESSWS_FRAGMENT_FILE}")
                 vlessws_key_path=$(extract_json_string_field "key_path" "${VLESSWS_FRAGMENT_FILE}")
             fi
@@ -3145,6 +3209,9 @@ remove_single_protocol() {
             fi
             if [ "$(vlessws_effective_cert_mode)" = "custom" ]; then
                 echo -e "${YELLOW}自备证书文件不受影响，仅清理脚本生成物${RESET}"
+            elif [ "$(vlessws_effective_cert_mode)" = "selfsigned" ]; then
+                # 自签证书可再生随删除协议一并清理
+                rm -f "${CERT_DIR}/vlessws-selfsigned.crt" "${CERT_DIR}/vlessws-selfsigned.key"
             fi
             rm -f "${VLESSWS_FRAGMENT_FILE}" "${VLESSWS_CLIENT_FILE}" "${VLESSWS_STATE_FILE}"
             ;;
@@ -4194,7 +4261,7 @@ show_menu() {
         menu_add_auto "仅安装 Hysteria2" "只部署 HY2，可在安装流程中选择是否启用 UDP 端口跳跃。" "install_hy2"
         menu_add_auto "仅安装 ShadowTLS" "只部署 ShadowTLS + Shadowsocks，兼容已有 ShadowTLS 客户端配置。" "install_shadowtls"
         menu_add_auto "仅安装 Snell v6" "只部署 Snell v6，轻量加密 + 流量整形，需要 sing-box 1.14+ 与支持 v6 的客户端。" "install_snell"
-        menu_add_auto "仅安装 VLESS WS TLS" "只部署 VLESS + WS + TLS，需要自有域名，可选 ACME 自动签发或自备证书文件，要求核心 1.14+。" "install_vlessws"
+        menu_add_auto "仅安装 VLESS WS TLS" "只部署 VLESS + WS + TLS，需要自有域名，可选 ACME 自动签发、自备证书文件或自签生成，要求核心 1.14+。" "install_vlessws"
         menu_add "0" "退出程序" "不执行任何操作，直接退出。" "exit"
         interactive_select "请选择安装方案:"
     else
@@ -4214,7 +4281,7 @@ show_menu() {
             menu_add_auto "安装 Snell v6" "新增 Snell v6 协议；核心低于 1.14 时会先升级 sing-box。" "install_snell"
         fi
         if ! has_protocol vlessws; then
-            menu_add_auto "安装 VLESS WS TLS" "新增 VLESS + WS + TLS 协议；需要自有域名，可选 ACME 自动签发或自备证书文件。" "install_vlessws"
+            menu_add_auto "安装 VLESS WS TLS" "新增 VLESS + WS + TLS 协议；需要自有域名，可选 ACME 自动签发、自备证书文件或自签生成。" "install_vlessws"
         fi
 
         menu_add_auto "查看节点链接配置" "默认进入简洁摘要；完整 Clash / Sing-box / Sub-Store 配置可在二级菜单打开。" "view_config"
